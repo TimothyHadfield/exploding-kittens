@@ -62,25 +62,39 @@ const ICON = {
 
 const textColor = (t) => (['EK', 'IK', 'NOPE'].includes(t) ? '#fff' : '#17130f');
 
+// Shared gradients (identical in every card, so repeated ids are harmless).
+const SHINE = `<defs><linearGradient id="ekShine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".10"/></linearGradient></defs>`;
+
 // Full card face. w = rendered width in px (height is 1.4×).
+// opts.tight: the card sits overlapped in a hand, so the icon and name shift
+// left into the part that stays visible.
 export function cardSVG(t, opts = {}) {
   const c = CARD[t] || CARD.TACO;
   const up = opts.up ? '<rect x="3" y="3" width="94" height="134" rx="9" fill="none" stroke="#fff" stroke-width="5"/>' : '';
   const dark = ['EK', 'IK'].includes(t);
   const bg = dark ? '#24242a' : '#fbf7ef';
-  return `<svg viewBox="0 0 100 140" class="cardsvg" role="img" aria-label="${c.name}">
+  const iconAt = opts.tight ? 'translate(-3,9) scale(.82)' : 'translate(0,4)';
+  const fs = c.short.length > (opts.tight ? 6 : 7) ? 12 : 14;
+  return `<svg viewBox="0 0 100 140" class="cardsvg" role="img" aria-label="${c.name}">${SHINE}
     <rect x="1" y="1" width="98" height="138" rx="10" fill="${bg}" stroke="#00000033"/>
     <rect x="1" y="1" width="98" height="104" rx="10" fill="${c.color}"/>
     <rect x="1" y="94" width="98" height="11" fill="${c.color}"/>
-    <g transform="translate(0,4)">${ICON[t] || ''}</g>
-    <text x="8" y="124" font-size="${c.short.length > 7 ? 12 : 14}" font-weight="800" fill="${dark ? '#fff' : '#1b1712'}" font-family="system-ui,sans-serif">${c.short}</text>
+    <rect x="1" y="1" width="98" height="104" rx="10" fill="url(#ekShine)"/>
+    <rect x="1" y="104" width="98" height="1.5" fill="#000" opacity=".18"/>
+    <g transform="${iconAt}">${ICON[t] || ''}</g>
+    <text x="8" y="124" font-size="${fs}" font-weight="800" fill="${dark ? '#fff' : '#1b1712'}" font-family="system-ui,sans-serif">${c.short}</text>
+    <rect x="4" y="4" width="92" height="132" rx="7.5" fill="none" stroke="#fff" stroke-opacity="${dark ? '.14' : '.4'}" stroke-width="1"/>
     ${up}</svg>`;
 }
 
 export function backSVG() {
   return `<svg viewBox="0 0 100 140" class="cardsvg" role="img" aria-label="card back">
-    <rect x="1" y="1" width="98" height="138" rx="10" fill="#5a1f22" stroke="#00000055"/>
+    <defs><pattern id="ekBackDots" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="5" cy="5" r="1.1" fill="#e8b45a" opacity=".22"/></pattern>
+    <radialGradient id="ekBackGlow" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#7a2a2e"/><stop offset="1" stop-color="#4a181b"/></radialGradient></defs>
+    <rect x="1" y="1" width="98" height="138" rx="10" fill="url(#ekBackGlow)" stroke="#00000055"/>
+    <rect x="7" y="7" width="86" height="126" rx="7" fill="url(#ekBackDots)"/>
     <rect x="7" y="7" width="86" height="126" rx="7" fill="none" stroke="#e8b45a" stroke-width="2" opacity=".7"/>
+    <circle cx="50" cy="70" r="24" fill="#4a181b" stroke="#e8b45a" stroke-opacity=".35" stroke-width="1.2"/>
     <g fill="#e8b45a" opacity=".85" transform="translate(50 70)">
       <path d="M-14-6l4-12 6 8M14-6l-4-12-6 8"/><circle r="15"/>
       <circle cx="-5" cy="-2" r="2.6" fill="#5a1f22"/><circle cx="5" cy="-2" r="2.6" fill="#5a1f22"/>

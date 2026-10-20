@@ -2,7 +2,7 @@
 
 ## START HERE
 Read order: this file → `CLAUDE.md` → `docs/rules-check.md` → `docs/ideas.md` → `chat.md`.
-Last updated: 2026-10-20 (QA fix round).
+Last updated: 2026-10-20 (visual design pass).
 
 ## Goal right now
 Tim (via the manager): "Also add ... Exploading kittens to the list" — a study site with the deck exactly right, variants, play vs computers / online, exact kitten odds, card tracker, hint, study mode, real-table companion, own data ideas. First version and the QA fix round are done and live; next is whatever Tim says after he tries it.
@@ -17,6 +17,7 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 | Online rooms (shared `_online` module) | Done; two headless browsers played a full game on the real Firebase project, secrecy checked |
 | Table tab (real-table companion) | Done; QA fixes covered by `tests/table.test.js` (6 tests) |
 | Learn tab: drill, strength, danger curve, seat order, opening cards | Done |
+| Visual design pass (2026-10-20) | Done: card art shine/keyline + patterned back, hand icons kept visible when overlapped, your-turn status edge + Draw glow, opponent-turn pulse, neutral disabled buttons, bigger laptop hand/seats, Table stats unwrapped on laptop, 40 px `?` tap areas |
 | QA by a fresh agent | Run 2026-10-19; every item fixed 2026-10-20 (see chat.md) |
 
 ## Standing instructions (Tim's words)
@@ -34,7 +35,8 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 - Game moves redraw only the Play tab (`renderIfPlay`); redrawing Table/Learn resets what the person is reading.
 - Table: two-event taps share a group `g` so Undo removes both; any change that makes `tableBelief` conflict or `bad` is reverted, never silently dropped.
 - `window.EK.perf.on = true` turns on per-step timings (scratchpad `lag3.js` reads them).
-- Bump `?v=N` on `css/style.css` and `js/app.js` in `index.html` when shipping CSS/JS changes (now `v=3`).
+- Bump `?v=N` on `css/style.css` and `js/app.js` in `index.html` when shipping CSS/JS changes (now `v=4`). `js/art.js` has no `?v`; it can lag ~10 min behind on Pages' cache.
+- Hand cards get `cardSVG(t, { tight: true })` when overlapped (>8 px): icon shifts left into the visible strip. Laptop hand card width is 112 px in both `style.css` (`--cw`) and `handOverlap()` — change both together.
 - `npm test` takes ~30 s (the secrecy test plays three full games).
 
 ## Decisions

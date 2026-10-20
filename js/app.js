@@ -478,7 +478,9 @@ function renderPlay() {
 
   const hand = (v.hand || []).slice().sort((a, b) => order(a.t) - order(b.t));
   const hintIds = S.hint && S.hint.cards ? S.hint.cards : [];
-  const handHtml = hand.map((c) => `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}">${cardSVG(c.t)}</button>`).join('');
+  const ov = handOverlap(hand.length);
+  const tight = ov > 8; // overlapped: draw each card's art inside its visible strip
+  const handHtml = hand.map((c) => `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}">${cardSVG(c.t, { tight })}</button>`).join('');
 
   // play button
   const selTypes = S.sel.map((id) => (hand.find((c) => c.id === id) || {}).t).filter(Boolean);
@@ -518,7 +520,8 @@ function renderPlay() {
   patch('p-hint', S.hint ? esc(S.hint.text) : '');
   const handEl = $('#hand');
   handEl.className = 'hand' + (myTurn ? '' : ' notmine');
-  handEl.style.setProperty('--ov', handOverlap(hand.length) + 'px');
+  root.querySelector('.game').classList.toggle('myturn', myTurn);
+  handEl.style.setProperty('--ov', ov + 'px');
   patch('hand', handHtml || '<span class="muted" style="margin:auto">No cards</span>');
   patch('p-acts', `<button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
           <button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>
@@ -534,7 +537,7 @@ function renderPlay() {
 function handOverlap(n) {
   if (n < 2) return 0;
   const lap = innerWidth >= 900;
-  const cw = lap ? 92 : innerWidth <= 360 ? 58 : 66;
+  const cw = lap ? 112 : innerWidth <= 360 ? 58 : 66;
   const W = (lap ? Math.min(innerWidth - 200 - 320, 900) : innerWidth) - 28;
   const need = (n * cw - W) / (n - 1);
   return Math.round(Math.max(lap ? -6 : 4, Math.min(cw - 44, need)));

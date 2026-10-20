@@ -22,8 +22,11 @@ function base() {
 export function tableBelief(t = T) {
   const s = (() => { const ed = EDITIONS[t.edition]; const P = Math.max(ed.min, Math.min(ed.max, t.players)); return newGame({ edition: t.edition, players: P, fast: t.fast }, 1).log[0]; })();
   const b = new Belief(s.deck + (t.adj || 0), s.ek, s.ik);
+  if (b.N < b.nE + b.nI) b.bad = true;
   for (const e of t.events) {
-    if (b.N <= 0 && e.t !== 'insertMe' && e.t !== 'insertOther' && e.t !== 'ikBack') continue;
+    if (b.bad) break;
+    // a draw, look or shuffle needs cards in the pile; never skip an event silently
+    if (b.N <= 0 && !['insertMe', 'insertOther', 'ikBack'].includes(e.t)) { b.bad = true; break; }
     switch (e.t) {
       case 'safe': b.draw('S', e.from || 'top'); break;
       case 'kitten': b.draw('E', e.from || 'top'); break;
@@ -82,7 +85,7 @@ export function renderTable() {
         <p class="muted" style="font-size:12.5px;margin:8px 0 0">Start: ${s.deck} cards, ${s.ek + s.ik} kitten${s.ek + s.ik > 1 ? 's' : ''}. Changing this restarts.</p>
       </div>
       <div class="panel"><h2>What happened</h2>
-        <div class="log" style="max-height:200px;overflow-y:auto">${T.events.length ? T.events.map((e, i) => `<div>${i + 1}. <b>${LABEL[e.t] || e.t}</b>${e.pos != null ? ' · ' + spotLabel(e.pos, 1e9).toLowerCase() : ''}${e.xs ? ' · ' + e.xs.map((x) => (x === 'E' ? 'kitten' : x === 'I' ? 'imploding' : 'safe')).join(', ') : ''}${e.from === 'bottom' ? ' (bottom)' : ''}</div>`).join('') : '<div>Nothing yet. Tap what happens at your table.</div>'}</div>
+        <div class="log" style="max-height:200px;overflow-y:auto">${T.events.length ? T.events.map((e, i) => `<div>${i + 1}. <b>${LABEL[e.t] || e.t}</b>${e.pos != null ? ' · ' + spotLabel(e.pos, 1e9).toLowerCase() : ''}${e.xs ? ' · ' + e.xs.map((x) => (x === 'E' ? 'kitten' : x === 'I' ? 'imploding' : x === 'U' ? 'imploding face up' : 'safe')).join(', ') : ''}${e.from === 'bottom' ? ' (bottom)' : ''}</div>`).join('') : '<div>Nothing yet. Tap what happens at your table.</div>'}</div>
         <button class="btn small ghost" data-t="reset" style="margin-top:8px">New game</button>
       </div>
     </div>
@@ -104,7 +107,8 @@ function renderTableSheet() {
         <button class="btn danger" data-t="exploded${bottom ? 'B' : ''}">They exploded</button>
       </div><div class="btns">${cancel}</div>`);
   } else if (sh === 'place' || sh === 'ikplace' || sh === 'ikpos') {
-    const N = b.N + (sh === 'ikpos' ? -1 : 0);
+    // the drawn kitten is only logged on Save, so the pile is one card smaller than b.N here
+    const N = b.N + (sh === 'ikpos' || ui.pending ? -1 : 0);
     const pos = Math.min(ui.place, Math.max(0, N));
     sheet(`<h3>${sh === 'place' ? 'Where did you hide it?' : sh === 'ikplace' ? 'Where did it go back (face up)?' : 'How deep is the face-up Imploding Kitten?'}</h3>
       <div class="spot" id="tspot">${spotLabel(pos, N)}</div>
@@ -113,7 +117,7 @@ function renderTableSheet() {
   } else if (sh === 'saw') {
     const n = Math.min(3, b.N);
     sheet(`<h3>You saw the top ${n}</h3><p>Tap a card to switch safe / kitten. Left = next card.</p>
-      <div class="grid3">${ui.saw.slice(0, n).map((x, i) => `<button class="btn ${x === 'E' ? 'danger' : x === 'I' ? 'primary' : ''}" data-t="sawflip:${i}" style="min-height:64px">${x === 'E' ? 'Kitten' : x === 'I' ? 'Imploding' : 'Safe'}</button>`).join('')}</div>
+      <div class="grid3">${ui.saw.slice(0, n).map((x, i) => `<button class="btn ${x === 'E' ? 'danger' : x === 'I' || x === 'U' ? 'primary' : ''}" data-t="sawflip:${i}" style="min-height:64px">${x === 'E' ? 'Kitten' : x === 'I' ? 'Imploding' : x === 'U' ? 'Imploding face up' : 'Safe'}</button>`).join('')}</div>
       <div class="btns">${cancel}<button class="btn primary" data-t="sawDone">Save</button></div>`);
   } else if (sh === 'ik') {
     sheet(`<h3>Imploding Kitten drawn</h3>
@@ -127,7 +131,11 @@ function renderTableSheet() {
   const w = document.querySelector('#sheet'); if (w) w.dataset.owner = 'table';
 }
 
-function add(e) { T.events.push(e); save(); }
+// One tap can log two events (a kitten drawn + where it went); they share a
+// group number so Undo takes them back together.
+let grp = 0;
+function add(e, g) { T.events.push(g ? { ...e, g } : e); save(); }
+const newGroup = () => (grp = Math.max(grp, ...T.events.map((e) => e.g || 0)) + 1);
 
 export function tableClick(btn) {
   const k = btn.dataset.t;
@@ -135,39 +143,51 @@ export function tableClick(btn) {
   const b = tableBelief();
   if (b.N <= 0 && ['safe', 'kittenSheet', 'sawSheet', 'bottomSheet', 'scramble', 'shuffle'].includes(k)) { toast('The pile is empty — fix the count or start a new game.'); return false; }
   const [cmd, arg] = k.split(':');
+  const before = JSON.stringify(T);
   switch (cmd) {
     case 'safe': add({ t: 'safe' }); break;
     case 'safeBottom': add({ t: 'safe', from: 'bottom' }); ui.sheet = null; break;
     case 'kittenSheet': ui.sheet = 'kitten'; break;
     case 'bottomSheet': ui.sheet = 'bottom'; break;
-    case 'defMe': case 'defMeB':
-      add({ t: 'kitten', from: cmd.endsWith('B') ? 'bottom' : 'top' }); ui.sheet = 'place'; ui.place = 0; ui.placeKind = 'insertMe'; break;
-    case 'defOther': case 'defOtherB':
-      add({ t: 'kitten', from: cmd.endsWith('B') ? 'bottom' : 'top' }); add({ t: 'insertOther' }); ui.sheet = null; break;
+    case 'defMe': case 'defMeB': // logged on Save, so Cancel leaves the pile as it was
+      ui.pending = { t: 'kitten', from: cmd.endsWith('B') ? 'bottom' : 'top' }; ui.sheet = 'place'; ui.place = 0; ui.placeKind = 'insertMe'; break;
+    case 'defOther': case 'defOtherB': {
+      const g = newGroup();
+      add({ t: 'kitten', from: cmd.endsWith('B') ? 'bottom' : 'top' }, g); add({ t: 'insertOther' }, g); ui.sheet = null; break;
+    }
     case 'exploded': case 'explodedB':
       add({ t: 'kitten', from: cmd.endsWith('B') ? 'bottom' : 'top' }); ui.sheet = null; break;
     case 'shuffle': add({ t: 'shuffle' }); if (T.ikUp) toast('Tap "Imploding seen at…" once you can see where it landed.'); break;
     case 'sawSheet': ui.sheet = 'saw'; ui.saw = ['S', 'S', 'S']; break;
-    case 'sawflip': { const i = +arg; const cyc = T.edition === 'imploding' ? ['S', 'E', 'I'] : ['S', 'E']; ui.saw[i] = cyc[(cyc.indexOf(ui.saw[i]) + 1) % cyc.length]; break; }
+    case 'sawflip': { const i = +arg; const cyc = T.edition === 'imploding' ? ['S', 'E', 'I', 'U'] : ['S', 'E']; ui.saw[i] = cyc[(cyc.indexOf(ui.saw[i]) + 1) % cyc.length]; break; }
     case 'sawDone': add({ t: 'saw', xs: ui.saw.slice(0, Math.min(3, b.N)) }); ui.sheet = null; break;
     case 'scramble': add({ t: 'scramble' }); break;
     case 'ikSheet': ui.sheet = 'ik'; break;
-    case 'ikFirst': add({ t: 'ikDraw' }); ui.sheet = 'ikplace'; ui.place = 0; ui.placeKind = 'ikBack'; T.ikUp = true; break;
+    case 'ikFirst': ui.pending = { t: 'ikDraw' }; ui.sheet = 'ikplace'; ui.place = 0; ui.placeKind = 'ikBack'; break;
     case 'ikDeadBtn': add({ t: 'ikDead' }); T.ikUp = false; ui.sheet = null; break;
     case 'ikposSheet': ui.sheet = 'ikpos'; ui.place = 0; ui.placeKind = 'ikpos'; break;
-    case 'placeDone': add({ t: ui.placeKind, pos: ui.place }); ui.sheet = null; break;
+    case 'placeDone': {
+      const g = ui.pending ? newGroup() : 0;
+      if (ui.pending) add(ui.pending, g);
+      if (ui.placeKind === 'ikBack') T.ikUp = true;
+      add({ t: ui.placeKind, pos: ui.place }, g); ui.sheet = null; ui.pending = null; break;
+    }
     case 'adjSheet': ui.sheet = 'adj'; break;
     case 'adj': T.adj = (T.adj || 0) + +arg; save(); break;
-    case 'undo': T.events.pop(); save(); break;
+    case 'undo': { const last = T.events.pop(); while (last && last.g && T.events.length && T.events[T.events.length - 1].g === last.g) T.events.pop(); save(); break; }
     case 'reset': T.events = []; T.adj = 0; T.ikUp = false; save(); break;
     case 'ed': T.edition = arg; T.events = []; T.adj = 0; save(); break;
     case 'pl': T.players += +arg; T.events = []; T.adj = 0; save(); break;
-    case 'close': ui.sheet = null; break;
+    case 'close': ui.sheet = null; ui.pending = null; break;
     default: return false;
   }
-  // test hook: is the belief still consistent?
+  // refuse anything that can't be true (a kitten that isn't there, a count
+  // below the kittens left) instead of quietly dropping logged events
   const nb = tableBelief();
-  if (nb.conflict) { T.events.pop(); save(); toast("That doesn't fit what you saw before — undone."); }
+  if (nb.conflict || nb.bad) {
+    T = JSON.parse(before); save(); ui.sheet = cmd === 'adj' ? 'adj' : null; ui.pending = null;
+    toast(cmd === 'adj' ? "The pile can't have fewer cards than that." : "That doesn't fit what you saw before — not saved.");
+  }
   return true;
 }
 

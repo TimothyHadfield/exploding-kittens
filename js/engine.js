@@ -271,7 +271,8 @@ export function apply(stIn, a, opts = {}) {
       if (st.phase === 'implode') c.up = true;
       st.deck.splice(pos, 0, c);
       if (c.t === 'EK') {
-        push(st, { t: 'insert', seat: a.seat, kind: 'E' });
+        // left = the hider's own turns still to come (public; computers hide by it)
+        push(st, { t: 'insert', seat: a.seat, kind: 'E', left: Math.max(0, st.turns - 1) });
         push(st, { t: 'insertAt', vis: [a.seat], pos });
         pushIkPos(st); // the face-up Imploding Kitten's visible depth may move
       } else {

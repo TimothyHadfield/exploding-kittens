@@ -9,7 +9,12 @@ export function pctColor(p) {
 }
 export const fmtPct = (p) => (p > 0 && p < 0.005 ? '<1' : p > 0.995 && p < 1 ? '>99' : Math.round(p * 100)) + '%';
 
+let lastToast = { msg: '', at: 0 };
 export function toast(msg) {
+  // fast double taps would repeat the same message; show it once
+  const now = Date.now();
+  if (msg === lastToast.msg && now - lastToast.at < 2000) return;
+  lastToast = { msg, at: now };
   document.querySelectorAll('.toast').forEach((t) => t.remove());
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg; t.setAttribute('role', 'status');
@@ -42,7 +47,7 @@ export function dialHTML(p, sub, R = 52) {
 
 export function futureHTML(b, n = 3) {
   if (!b) return '';
-  return `<div class="future">${[...Array(Math.min(n, b.N)).keys()].map((i) => {
+  return `<div class="future">${[...Array(Math.max(0, Math.min(n, b.N))).keys()].map((i) => {
     const k = b.known(i);
     if (k) return `<span class="${k}" title="card ${i + 1}">${k === 'S' ? '✓' : k === 'E' ? '💣' : 'IK'}</span>`;
     const p = b.prob(i, 'E') + b.prob(i, 'U');

@@ -27,9 +27,10 @@ export function makeRng(seed) {
 const pick = (arr, r) => arr[Math.floor(r() * arr.length)];
 
 // Shared numbers a bot (or the hint button) reasons with.
-export function assess(v, level = 'hard') {
+export function assess(v, level = 'hard', opts = {}) {
   const me = v.me;
-  const b = beliefFromLog(v.log, me);
+  // Easy/Medium only use what's certain (seen cards, counts): a small belief is plenty
+  const b = beliefFromLog(v.log, me, level === 'hard' ? opts : { ...opts, lite: true });
   const N = v.deckCount;
   const kittensLeft = b ? b.nE : 0;
   const naive = N ? kittensLeft / N : 0;
@@ -43,7 +44,7 @@ export function assess(v, level = 'hard') {
   return { b, N, pE, pDeath: pE + pU, pU, naive, top, bottomE, hand, has, others, hasDef: has('DEF').length > 0 };
 }
 
-export function decide(v, level = 'medium', r = Math.random) {
+export function decide(v, level = 'medium', r = Math.random, opts = {}) {
   const me = v.me;
   if (v.phase === 'nope') return decideNope(v, level, r);
   if (v.phase === 'favor') {
@@ -59,7 +60,7 @@ export function decide(v, level = 'medium', r = Math.random) {
     ok.sort((a, b) => cardValue(b.t) - cardValue(a.t));
     return { type: 'pick', seat: me, card: (level === 'easy' ? pick(ok, r) : ok[0]).id };
   }
-  return decideTurn(v, level, r);
+  return decideTurn(v, level, r, opts);
 }
 
 function nextSeat(v, from, dir = v.dir) {
@@ -69,9 +70,9 @@ function nextSeat(v, from, dir = v.dir) {
 }
 
 // --------------------------------------------------------------- turn
-function decideTurn(v, level, r) {
+function decideTurn(v, level, r, opts = {}) {
   const me = v.me;
-  const A = assess(v, level);
+  const A = assess(v, level, opts);
   const { has, others, hasDef } = A;
   const play = (c, extra = {}) => ({ type: 'play', seat: me, cards: [c.id], ...extra });
   const draw = { type: 'draw', seat: me };
@@ -210,6 +211,16 @@ function placeKitten(v, level, r) {
   // hard: right where the next player draws it, unless that's me again
   const pos = mineLeft;
   return Math.min(N, pos);
+}
+
+// The same habit as weights over the N+1 spots, so a player who knows which
+// computer hid the kitten can use it. Easy = any spot (null).
+export function placeWeights(level, N, left) {
+  if (level !== 'medium' && level !== 'hard') return null;
+  const w = Array(N + 1).fill(0);
+  if (level === 'hard') w[Math.min(N, left)] = 1;
+  else for (let j = 0; j < 3; j++) w[Math.min(N, left + j)] += 1;
+  return w;
 }
 
 function alterOrder(v, level) {

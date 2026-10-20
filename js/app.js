@@ -2,7 +2,7 @@
 // template strings, data-* attributes + event delegation.
 import { CARD, EDITIONS, boxFor } from './cards.js';
 import { newGame, apply, view, waitingOn, comboKind } from './engine.js';
-import { decide, assess } from './ai.js';
+import { decide, assess, placeWeights } from './ai.js';
 import { beliefFromLog } from './odds.js';
 import { cardSVG, backSVG } from './art.js';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML } from './ui.js';
@@ -13,6 +13,7 @@ import { createOnline } from './online.js';
 
 export const VERSION = 'v1.0';
 const LS = 'ek:v1';
+const LAPTOP = matchMedia('(min-width: 900px)');
 const BOT_NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fay', 'Gus', 'Hal', 'Ivy'];
 
 // ------------------------------------------------------------------ state
@@ -30,8 +31,16 @@ function load() {
     const d = JSON.parse(localStorage.getItem(LS) || 'null');
     if (!d) return;
     Object.assign(S.settings, d.settings || {});
-    if (d.setup) S.setup = d.setup;
-    if (d.game && d.seats) { S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = d.game.log.length; }
+    if (d.setup && typeof d.setup === 'object') {
+      const su = d.setup;
+      S.setup = {
+        edition: EDITIONS[su.edition] ? su.edition : 'original',
+        players: Number.isInteger(su.players) ? su.players : 4,
+        seats: Array.isArray(su.seats) ? su.seats.filter((x) => x && typeof x === 'object' && typeof x.name === 'string') : null,
+        myName: typeof su.myName === 'string' ? su.myName.slice(0, 12) : '',
+      };
+    }
+    if (d.game && d.game.log && d.game.hands && Array.isArray(d.seats)) { S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = d.game.log.length; }
     if (d.tab) S.tab = d.tab;
   } catch { /* storage blocked: start fresh */ }
 }
@@ -43,7 +52,8 @@ function save() {
 }
 export const settings = () => S.settings;
 
-function defaultSeats(n, old = []) {
+function defaultSeats(n, old) {
+  old = Array.isArray(old) ? old : [];
   const out = [];
   for (let i = 0; i < n; i++) {
     out.push(old[i] || (i === 0 ? { type: 'me', name: 'You' } : { type: 'bot', level: 'medium', name: BOT_NAMES[i - 1] }));
@@ -55,6 +65,14 @@ if (!S.setup.seats) S.setup.seats = defaultSeats(4);
 // ------------------------------------------------------------------ helpers
 const name = (s) => (S.seats && S.seats[s] ? S.seats[s].name : 'Player ' + (s + 1));
 const cname = (t) => (CARD[t] ? CARD[t].name : t);
+// How each seat hides a defused kitten: computers by their known habit, people anywhere.
+function placeOpts() {
+  const seats = S.seats || [];
+  return {
+    key: seats.map((x) => (x.type === 'bot' ? x.level[0] : 'p')).join(''),
+    place: (seat, N, left) => (seats[seat] && seats[seat].type === 'bot' ? placeWeights(seats[seat].level, N, left) : null),
+  };
+}
 const isHuman = (s) => S.seats && S.seats[s] && S.seats[s].type !== 'bot';
 const humans = () => (S.seats || []).map((x, i) => (x.type !== 'bot' ? i : -1)).filter((i) => i >= 0);
 
@@ -101,7 +119,13 @@ function describe(e, me) {
 }
 
 // ------------------------------------------------------------------ tabs
-function setTab(t) {
+// Each tab switch is a history step, so the phone's Back returns to the last
+// tab instead of leaving the site.
+function setTab(t, how = 'push') {
+  try {
+    if (how === 'push' && t !== S.tab) history.pushState({ tab: t }, '');
+    else if (how === 'replace') history.replaceState({ tab: t }, '');
+  } catch { /* history not available */ }
   S.tab = t;
   closeSheet();
   document.querySelectorAll('nav.tabs button').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === t ? 'page' : 'false'));
@@ -110,8 +134,18 @@ function setTab(t) {
   save();
 }
 
+// Timing probe for tests: window.EK.perf collects ms per step when switched on.
+const perf = { on: false, t: {} };
+function timed(k, f) {
+  if (!perf.on) return f();
+  const t0 = performance.now();
+  try { return f(); } finally { const d = performance.now() - t0; const o = (perf.t[k] = perf.t[k] || { n: 0, sum: 0, max: 0 }); o.n++; o.sum += d; o.max = Math.max(o.max, d); }
+}
+// Game moves only redraw the Play tab; redrawing Table or Learn would reset
+// what the person is reading or typing there.
+function renderIfPlay() { if (S.tab === 'play') render(); }
 function render() {
-  if (S.tab === 'play') renderPlay();
+  if (S.tab === 'play') timed('render', renderPlay);
   else if (S.tab === 'table') $('#v-table').innerHTML = renderTable();
   else if (S.tab === 'learn') $('#v-learn').innerHTML = renderLearn();
   else if (S.tab === 'settings') renderSettings();
@@ -268,9 +302,9 @@ let timer = null;
 function step() {
   clearTimeout(timer);
   const g = S.game;
-  if (S.net) { if (g) S.viewer = S.net.mySeat; render(); return; } // the host's browser runs the computers
-  if (!g) { render(); return; }
-  if (g.phase === 'over') { S.viewer = humans()[0] ?? 0; render(); return; }
+  if (S.net) { if (g) S.viewer = S.net.mySeat; renderIfPlay(); return; } // the host's browser runs the computers
+  if (!g) { renderIfPlay(); return; }
+  if (g.phase === 'over') { S.viewer = humans()[0] ?? 0; renderIfPlay(); return; }
   const gen = S.gen;
   const waiting = waitingOn(g);
   const bot = waiting.find((s) => !isHuman(s));
@@ -279,19 +313,19 @@ function step() {
     const human = waiting.find((s) => isHuman(s));
     if (human != null) S.viewer = human;
     else if (isHuman(g.cur)) S.viewer = g.cur;
-    render();
+    renderIfPlay();
     const d = g.phase === 'nope' ? 380 : DELAY[S.settings.speed] || 700;
     timer = setTimeout(() => {
       if (gen !== S.gen || S.game !== g) return;
       const v = view(g, bot);
-      const a = decide(v, S.seats[bot].level, Math.random);
+      const a = timed('bot', () => decide(v, S.seats[bot].level, Math.random));
       act(a, true);
     }, d);
     return;
   }
   const h = waiting[0];
   if (h != null) S.viewer = h;
-  render();
+  renderIfPlay();
 }
 
 function act(a, fromBot = false) {
@@ -301,20 +335,20 @@ function act(a, fromBot = false) {
   if (!fromBot && g.phase === 'turn' && (a.type === 'play' || a.type === 'draw')) {
     try {
       const v = view(g, a.seat);
-      const A = assess(v, 'hard');
-      const best = decide(v, 'hard', () => 0.5);
-      S.review.push({ turn: g.turnNo, pE: A.pDeath, mine: summarize(v, a), best: summarize(v, best), same: sameAction(a, best), hasDef: A.hasDef });
+      const A = assess(v, 'hard', placeOpts());
+      const best = decide(v, 'hard', () => 0.5, placeOpts());
+      S.review.push({ seat: a.seat, turn: g.turnNo, pE: A.pDeath, mine: summarize(v, a), best: summarize(v, best), same: sameAction(a, best), hasDef: A.hasDef });
     } catch { /* review is optional */ }
   }
   if (S.net) {
     const { seat: _seat, ...move } = a;
     S.sel = []; S.hint = null;
     getNet().act(move).then((r) => { if (!r.ok) toast(r.message); });
-    render();
+    renderIfPlay();
     return;
   }
   let next;
-  try { next = apply(g, a); } catch (e) { toast(e.message); return; }
+  try { next = timed('apply', () => apply(g, a)); } catch (e) { toast(e.message); return; }
   const before = g.log.length;
   S.game = next;
   const fresh = next.log.slice(before);
@@ -393,9 +427,9 @@ function renderPlay() {
   const g = S.game;
   const me = S.viewer;
   const study = S.settings.study && !S.net; // never online: it would show other hands
-  const v = view(g, study ? -1 : me);
+  const v = timed('r.view', () => view(g, study ? -1 : me));
   if (study) { v.me = me; v.hand = v.hands[me]; v.log = view(g, me).log; v.pending = view(g, me).pending; }
-  const b = beliefFromLog(view(g, me).log, me);
+  const b = timed('r.belief', () => beliefFromLog(view(g, me).log, me, placeOpts()));
   const multiHuman = !S.net && humans().length > 1;
 
   // pass-the-phone cover
@@ -410,7 +444,7 @@ function renderPlay() {
   const pDanger = pE + pU;
   const kittens = b ? b.nE + ((g.ikIn ?? g.deck.some((c) => c.t === 'IK')) ? 1 : 0) : 0;
   const dial = S.settings.odds ? `<div class="dial">${dialHTML(pDanger, 'next is a kitten')}
-      <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. When someone else hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
+      <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. Computers hide kittens by habit (Hard: right where the next player draws), and the odds use that; when a person hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
       ${futureHTML(b)}
     </div>` : '<div></div>';
 
@@ -458,28 +492,42 @@ function renderPlay() {
     ${rows.map((r) => `<tr><td><span class="dot" style="background:${CARD[r.t].color}"></span>${CARD[r.t].short}</td><td>${r.inGame}</td><td>${r.disc}</td><td>${r.mine}</td><td><b>${r.unseen}</b></td></tr>`).join('')}</table></div>`;
   const logHtml = `<div class="panel"><h2>Log</h2><div class="log" id="loglist">${lastLines.slice(-60).map((l) => `<div>${l}</div>`).join('')}</div></div>`;
 
-  root.innerHTML = `<div class="ingame" style="height:100%">
-    <div class="game">
-      <div class="opps">${opps}</div>
-      <div class="felt">${deck}${dial}${discard}</div>
-      <div class="status"><div class="grow">${status}</div>
-        <button class="btn small ghost phone-only" data-sheet="info" aria-label="Cards and log">Cards</button>
-        <button class="btn small ghost" data-newgame>${g.phase === 'over' ? 'New' : 'Menu'}</button></div>
-      <div class="hint-text">${S.hint ? esc(S.hint.text) : ''}</div>
-      <div>
-        <div class="hand ${myTurn ? '' : 'notmine'}" id="hand" style="--ov:${handOverlap(hand.length)}px">${handHtml || '<span class="muted" style="margin:auto">No cards</span>'}</div>
-        <div class="acts">
-          <button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
-          <button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>
-          <button class="btn primary" data-draw ${myTurn ? '' : 'disabled'}>Draw</button>
+  // Build the frame once, then only touch the parts whose HTML changed:
+  // re-parsing every SVG card on each computer move was slow on phones.
+  if (!root.querySelector(':scope > .ingame')) {
+    root.innerHTML = `<div class="ingame" style="height:100%">
+      <div class="game">
+        <div class="opps" id="p-opps"></div>
+        <div class="felt" id="p-felt"></div>
+        <div class="status" id="p-status"></div>
+        <div class="hint-text" id="p-hint"></div>
+        <div>
+          <div class="hand" id="hand"></div>
+          <div class="acts" id="p-acts"></div>
         </div>
       </div>
-    </div>
-    <aside class="side">${tracker}${logHtml}</aside>
-  </div>`;
-  const ll = $('#loglist'); if (ll) ll.scrollTop = ll.scrollHeight;
+      <aside class="side" id="p-side"></aside>
+    </div>`;
+  }
+  const patch = (id, html) => timed('p.' + id, () => { const el = document.getElementById(id); if (el && el._html !== html) { el.innerHTML = html; el._html = html; return true; } return false; });
+  patch('p-opps', opps);
+  patch('p-felt', deck + dial + discard);
+  patch('p-status', `<div class="grow">${status}</div>
+        <button class="btn small ghost phone-only" data-sheet="info" aria-label="Cards and log">Cards</button>
+        <button class="btn small ghost" data-newgame>${g.phase === 'over' ? 'New' : 'Menu'}</button>`);
+  patch('p-hint', S.hint ? esc(S.hint.text) : '');
+  const handEl = $('#hand');
+  handEl.className = 'hand' + (myTurn ? '' : ' notmine');
+  handEl.style.setProperty('--ov', handOverlap(hand.length) + 'px');
+  patch('hand', handHtml || '<span class="muted" style="margin:auto">No cards</span>');
+  patch('p-acts', `<button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
+          <button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>
+          <button class="btn primary" data-draw ${myTurn ? '' : 'disabled'}>Draw</button>`);
+  const sideNew = patch('p-side', tracker + logHtml);
+  // the log only shows on laptop width; reading scrollHeight forces a full layout, so do it after paint
+  if (sideNew && LAPTOP.matches) requestAnimationFrame(() => { const ll = $('#loglist'); if (ll) ll.scrollTop = ll.scrollHeight; });
   S.newIds = new Set();
-  renderPrompt(v, b, rows, lastLines);
+  timed('r.prompt', () => renderPrompt(v, b, rows, lastLines));
 }
 
 // Overlap cards just enough to fit the row; past that the row scrolls.
@@ -510,13 +558,19 @@ function renderPrompt(v, b, rows, lines) {
   }
   if (g.phase === 'over') {
     const won = S.net ? g.winner === me : isHuman(g.winner);
-    const rv = S.review;
-    const same = rv.filter((r) => r.same).length;
-    const worst = rv.filter((r) => !r.same).sort((a, b) => b.pE - a.pE).slice(0, 4);
+    // pass-the-phone: each person gets their own score, not one pooled total
+    const people = !S.net && humans().length > 1 ? humans() : null;
+    const reviewOf = (rv, who) => {
+      if (!rv.length) return '';
+      const same = rv.filter((r) => r.same).length;
+      const worst = rv.filter((r) => !r.same).sort((a, b) => b.pE - a.pE).slice(0, people ? 2 : 4);
+      return `<p>${who ? '<b>' + esc(who) + '</b> matched' : 'Your choices matched'} the Hard computer <b>${same} of ${rv.length}</b> times. ${help('After each of your turn moves we asked the Hard computer what it would do with the same cards and the same knowledge.')}</p>
+      ${worst.length ? `<ul class="review">${worst.map((r) => `<li>Kitten chance <b style="color:${pctColor(r.pE)}">${fmtPct(r.pE)}</b>: ${who ? 'chose' : 'you chose'} <b>${esc(r.mine)}</b>, Hard would <b>${esc(r.best)}</b>.</li>`).join('')}</ul>` : ''}`;
+    };
+    const reviewHtml = people ? people.map((p) => reviewOf(S.review.filter((r) => r.seat === p), name(p))).join('') : reviewOf(S.review, '');
     const btns = S.net ? '<button class="btn primary" data-leave>Leave room</button>' : '<button class="btn" data-setup>Change setup</button><button class="btn primary" data-again>Play again</button>';
     sheet(`<h3>${won ? (!S.net && humans().length > 1 ? esc(name(g.winner)) + ' wins!' : 'You win! 🏆') : esc(name(g.winner)) + ' wins'}</h3>
-      ${rv.length ? `<p>Your choices matched the Hard computer <b>${same} of ${rv.length}</b> times. ${help('After each of your turn moves we asked the Hard computer what it would do with the same cards and the same knowledge.')}</p>
-      ${worst.length ? `<ul class="review">${worst.map((r) => `<li>Kitten chance <b style="color:${pctColor(r.pE)}">${fmtPct(r.pE)}</b>: you chose <b>${esc(r.mine)}</b>, Hard would <b>${esc(r.best)}</b>.</li>`).join('')}</ul>` : ''}` : ''}
+      ${reviewHtml}
       <div class="btns">${btns}</div>`);
     return;
   }
@@ -667,8 +721,8 @@ function onClick(e) {
   }
   if ('hint' in d) {
     const v = view(g, me);
-    const best = decide(v, 'hard', () => 0.5);
-    const A = assess(v, 'hard');
+    const best = decide(v, 'hard', () => 0.5, placeOpts());
+    const A = assess(v, 'hard', placeOpts());
     S.hint = { cards: best.type === 'play' ? best.cards : [], text: hintText(v, best, A) };
     render(); return;
   }
@@ -771,10 +825,18 @@ $('#ver').textContent = VERSION;
 document.addEventListener('click', onClick);
 document.addEventListener('input', onInput);
 document.addEventListener('change', onChange);
-setTab(S.tab);
-if (S.game && S.game.phase !== 'over') step();
+addEventListener('popstate', (e) => { const t = e.state && e.state.tab; if (t) setTab(t, 'none'); });
+try {
+  setTab(['play', 'table', 'learn', 'settings'].includes(S.tab) ? S.tab : 'play', 'replace');
+  if (S.game && S.game.phase !== 'over') step();
+} catch (e) {
+  // a saved game we can't draw (old version, damaged storage): start clean, keep settings
+  console.warn('dropped saved game', e);
+  S.game = null; S.seats = null; S.review = []; S.screen = 'setup';
+  save(); setTab('play', 'replace');
+}
 // back into an online room after a reload (loads nothing unless a room was saved)
 try { if (localStorage.getItem('online.exploding-kittens')) getNet().resume(); } catch { /* storage blocked */ }
 
 // for tests / debugging in the console
-window.EK = { S, act, step, view: () => S.game && view(S.game, S.viewer), net: () => net };
+window.EK = { S, act, step, view: () => S.game && view(S.game, S.viewer), net: () => net, perf };

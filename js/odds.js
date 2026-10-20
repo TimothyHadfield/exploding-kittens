@@ -9,16 +9,20 @@
 // when someone else hides a kitten, or alters the future, we don't know where
 // it went, so every spot is equally likely.
 
-const MAX_WORLDS = 40000;
+// Above this many worlds we keep the heaviest ones (a tiny approximation,
+// flagged by .approx). Big Party Pack games need it to stay fast on a phone.
+const MAX_WORLDS = 1500;
+const EXPAND_BUDGET = 8000;
 
 export class Belief {
-  constructor(N = 0, nE = 0, nI = 0) {
+  constructor(N = 0, nE = 0, nI = 0, lite = false) {
+    this.max = lite ? 300 : MAX_WORLDS; this.budget = lite ? 2000 : EXPAND_BUDGET; this.lite = lite;
     this.N = N; this.nE = nE; this.nI = nI;
     this.worlds = [{ w: 1, k: [] }]; // k: sorted [{p, x}]
   }
 
   clone() {
-    const b = new Belief(this.N, this.nE, this.nI);
+    const b = new Belief(this.N, this.nE, this.nI, this.lite);
     b.worlds = this.worlds.map((W) => ({ w: W.w, k: W.k.map((e) => ({ ...e })) }));
     return b;
   }
@@ -54,16 +58,20 @@ export class Belief {
   _merge() {
     const m = new Map();
     for (const W of this.worlds) {
-      W.k.sort((a, b) => a.p - b.p);
-      const key = W.k.map((e) => e.p + e.x).join(',');
+      const k = W.k;
+      let sorted = true;
+      for (let i = 1; i < k.length; i++) if (k[i - 1].p > k[i].p) { sorted = false; break; }
+      if (!sorted) k.sort((a, b) => a.p - b.p);
+      let key = '';
+      for (let i = 0; i < k.length; i++) key += k[i].p + k[i].x;
       const o = m.get(key);
       if (o) o.w += W.w; else m.set(key, W);
     }
     this.worlds = [...m.values()];
-    if (this.worlds.length > MAX_WORLDS) {
+    if (this.worlds.length > this.max) {
       // keep the heaviest worlds; tiny loss of exactness, flagged by .approx
       this.worlds.sort((a, b) => b.w - a.w);
-      this.worlds.length = MAX_WORLDS;
+      this.worlds.length = this.max;
       this.approx = true;
     }
     this._normalize();
@@ -74,7 +82,9 @@ export class Belief {
     const pos = from === 'top' ? 0 : this.N - 1;
     for (const W of this.worlds) {
       const e = W.k.find((q) => q.p === pos);
-      W.w *= e ? (e.x === x ? 1 : 0) : this._probUnknown(W, x);
+      // a face-up kitten is in plain sight: drawing it only rules out worlds that put it elsewhere
+      if (!e && x === 'U') W.w *= W.k.some((q) => q.x === 'U') ? 0 : 1;
+      else W.w *= e ? (e.x === x ? 1 : 0) : this._probUnknown(W, x);
       W.k = W.k.filter((q) => q.p !== pos);
       if (from === 'top') for (const q of W.k) q.p--;
     }
@@ -95,16 +105,37 @@ export class Belief {
     this._merge();
   }
 
-  // Someone else hid a kitten somewhere we didn't see.
-  insertUnknown(x = 'E') {
+  // Someone else hid a kitten somewhere we didn't see. weights[pos] (length
+  // N+1, any scale) = how likely the hider picks each spot; null = uniform.
+  insertUnknown(x = 'E', weights = null) {
     const out = [];
     const N = this.N;
+    // each world splits into up to N+1; keep the work bounded on a phone
+    const room = Math.max(50, Math.floor(this.budget / (N + 1)));
+    if (this.worlds.length > room) {
+      this.worlds.sort((a, b) => b.w - a.w);
+      this.worlds.length = room;
+      this.approx = true;
+    }
+    let wt = null;
+    if (weights) {
+      const tot = weights.reduce((a, c) => a + c, 0);
+      if (tot > 0) wt = weights.map((c) => c / tot);
+    }
     for (const W of this.worlds) {
-      if (W.k.length === 0) { out.push(W); continue; } // stays an unbiased shuffle
+      if (!wt && W.k.length === 0) { out.push(W); continue; } // stays an unbiased shuffle
       for (let pos = 0; pos <= N; pos++) {
-        const k = W.k.map((q) => ({ p: q.p >= pos ? q.p + 1 : q.p, x: q.x }));
-        k.push({ p: pos, x });
-        out.push({ w: W.w / (N + 1), k });
+        const f = wt ? wt[pos] || 0 : 1 / (N + 1);
+        if (!f) continue;
+        // W.k is sorted by p; build the new list already sorted
+        const k = [];
+        let put = false;
+        for (const q of W.k) {
+          if (!put && q.p >= pos) { k.push({ p: pos, x }); put = true; }
+          k.push({ p: q.p >= pos ? q.p + 1 : q.p, x: q.x }); // fresh objects: later steps edit p in place
+        }
+        if (!put) k.push({ p: pos, x });
+        out.push({ w: W.w * f, k });
       }
     }
     this.worlds = out;
@@ -133,6 +164,7 @@ export class Belief {
       for (let p = 0; p < xs.length && w > 0; p++) {
         const e = W.k.find((q) => q.p === p);
         if (e) { if (e.x !== xs[p]) w = 0; continue; }
+        if (xs[p] === 'U') { if (W.k.some((q) => q.x === 'U')) w = 0; else W.k.push({ p, x: 'U' }); continue; }
         w *= this._probUnknown(W, xs[p]);
         W.k.push({ p, x: xs[p] });
       }
@@ -202,19 +234,49 @@ function permutations(a) {
 export const kindOf = (t) => (t === 'EK' ? 'E' : t === 'IK' ? 'I' : t === 'IK+' ? 'U' : 'S');
 
 // Build a seat's belief from the log it can see (view(state, seat).log).
-export function beliefFromLog(log, me) {
-  let b = null;
-  let pendingOwnInsert = false;
-  for (const e of log) {
+// opts.place(seat, N, left) -> weights over the N+1 spots when we know how
+// that player hides kittens (a computer), or null for "any spot" (a person).
+// opts.key names that policy for the cache.
+//
+// Logs only grow, so we cache the belief per (seat, policy) and replay just
+// the new events. A fingerprint of the replayed prefix guards against a
+// different game that happens to start the same way.
+const cache = [];
+const CACHE_MAX = 48; // 10 seats x a couple of policies
+const fp = (h, e) => {
+  const s = JSON.stringify(e);
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return h;
+};
+
+export function beliefFromLog(log, me, opts = {}) {
+  const key = me + '|' + (opts.key || 'u') + (opts.lite ? '|lite' : '');
+  let c = cache.find((x) => x.key === key && x.len <= log.length);
+  if (c) {
+    let h = 7;
+    for (let i = 0; i < c.len; i++) h = fp(h, log[i]);
+    if (h !== c.h) c = null;
+  }
+  if (!c) {
+    c = { key, len: 0, h: 7, b: null, pending: false };
+    const i = cache.findIndex((x) => x.key === key);
+    if (i >= 0) cache.splice(i, 1);
+    cache.unshift(c);
+    if (cache.length > CACHE_MAX) cache.pop();
+  }
+  for (let i = c.len; i < log.length; i++) {
+    const e = log[i];
+    c.h = fp(c.h, e);
+    const b = c.b;
     switch (e.t) {
-      case 'setup': b = new Belief(e.deck, e.ek, e.ik); break;
+      case 'setup': c.b = new Belief(e.deck, e.ek, e.ik, !!opts.lite); c.pending = false; break;
       case 'draw': b.draw(e.res, e.from); break;
       case 'insert':
         if (e.kind === 'U') b.insertKnown(e.pos, 'U');
-        else if (e.seat === me) pendingOwnInsert = true;
-        else b.insertUnknown('E');
+        else if (e.seat === me) c.pending = true;
+        else b.insertUnknown('E', opts.place ? opts.place(e.seat, b.N, e.left || 0) : null);
         break;
-      case 'insertAt': if (pendingOwnInsert) { b.insertKnown(e.pos, 'E'); pendingOwnInsert = false; } break;
+      case 'insertAt': if (c.pending) { b.insertKnown(e.pos, 'E'); c.pending = false; } break;
       case 'shuffle': b.shuffle(); break;
       case 'ikpos': b.faceUpAt(e.pos); break;
       case 'saw': b.saw(e.cards.map(kindOf)); break;
@@ -222,5 +284,6 @@ export function beliefFromLog(log, me) {
       case 'altdone': if (e.seat !== me) b.scrambleTop(3); break;
     }
   }
-  return b;
+  c.len = log.length;
+  return c.b;
 }

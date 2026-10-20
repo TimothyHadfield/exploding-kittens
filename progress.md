@@ -2,7 +2,7 @@
 
 ## START HERE
 Read order: this file → `CLAUDE.md` → `docs/rules-check.md` → `docs/ideas.md` → `chat.md`.
-Last updated: 2026-10-20 (visual design pass).
+Last updated: 2026-10-20 (sounds, celebrations and animations).
 
 ## Goal right now
 Tim (via the manager): "Also add ... Exploading kittens to the list" — a study site with the deck exactly right, variants, play vs computers / online, exact kitten odds, card tracker, hint, study mode, real-table companion, own data ideas. First version and the QA fix round are done and live; next is whatever Tim says after he tries it.
@@ -18,11 +18,41 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 | Table tab (real-table companion) | Done; QA fixes covered by `tests/table.test.js` (6 tests) |
 | Learn tab: drill, strength, danger curve, seat order, opening cards | Done |
 | Visual design pass (2026-10-20) | Done: card art shine/keyline + patterned back, hand icons kept visible when overlapped, your-turn status edge + Draw glow, opponent-turn pulse, neutral disabled buttons, bigger laptop hand/seats, Table stats unwrapped on laptop, 40 px `?` tap areas |
+| Sounds, celebrations, animations (2026-10-20) | Done: shared `js/fx.js` (verbatim copy of `_fx/fx.js`) + game map `js/sfx.js`; "Sound & effects" panel in Settings; 7 tests in `tests/fx.test.js` |
 | QA by a fresh agent | Run 2026-10-19; every item fixed 2026-10-20 (see chat.md) |
 
 ## Standing instructions (Tim's words)
 - "Also add ... Exploading kittens to the list" (the game request).
+- "add opptional sounds you can add to the games that reflect what's happening in the game accurately as well as win celebrations, and other fun annimations to go along with everything. Just make sure everything is customizable in the settings so the user can play as preffered." (2026-10-20)
 - Global: never ask permission; $0; background-only testing; Tim owns looks/wording/names.
+
+## Event → sound map (`js/sfx.js`; others' moves at 0.75 volume)
+| Event | Sound | Animation |
+|---|---|---|
+| New game | shuffle, 3× cardDeal | pile shakes |
+| Turn becomes yours (not repeat attacked turns) | turn chime | "Your turn" pops; dial pulses if kitten chance ≥ 30% |
+| Card played | cardFlip | computer's card flies from its seat to the discard |
+| Nope / Yup | stamp (Yup higher) | "NOPE!" red / "YUP!" green floats off the discard, discard pops |
+| See the Future / Alter resolves | whoosh | pile flashes blue |
+| Skip resolves | whoosh (higher) | — |
+| Draw (any seat) | cardDeal | card flies from pile to that seat; your new card deals in (existing) |
+| Draw with kitten chance ≥ 30% (odds shown) | roll (drumroll) first, draw waits 360 ms | pile shakes |
+| Imploding Kitten drawn face down / put back face up | ominous low note | pile shakes |
+| Defuse | snip, then phew | felt flashes green, "Defused!" floats; your defuse = star sparkle |
+| Kitten hidden back | cardSlide | — |
+| Explosion (player out) | explosion | orange boom flash (existing), game shakes, their seat flashes red |
+| Shuffle | shuffle | pile shakes |
+| Attack | hit | target seat/hand shakes, "N turns" floats |
+| Reverse | slide | — |
+| Favor given | cardDeal | card flies giver → taker |
+| Pair steal / 3-of-a-kind hit | snatch | card flies |
+| 3-of-a-kind miss / empty hand | miss | asked seat shakes |
+| Five-card pick | cardDeal | card flies from discard |
+| A Defuse lands in your hand | — | star sparkle |
+| Game over | win fanfare + confetti (you or any person at the table in pass-the-phone) / lose | — |
+| Illegal move or bad room code | error | — |
+| Table tab taps | safe = cardDeal; kitten = cardDeal + explosion (or snip + phew if hidden); shuffle; saw = whoosh; altered/hid = cardSlide | explosion shakes the odds panel |
+Online: sounds come from the snapshot log diff, so every player hears every move; each sees their own win/lose.
 
 ## Traps
 - `js/online.js` is a verbatim copy of the shared module. Don't edit it here.
@@ -35,9 +65,13 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 - Game moves redraw only the Play tab (`renderIfPlay`); redrawing Table/Learn resets what the person is reading.
 - Table: two-event taps share a group `g` so Undo removes both; any change that makes `tableBelief` conflict or `bad` is reverted, never silently dropped.
 - `window.EK.perf.on = true` turns on per-step timings (scratchpad `lag3.js` reads them).
-- Bump `?v=N` on `css/style.css` and `js/app.js` in `index.html` when shipping CSS/JS changes (now `v=4`). `js/art.js` has no `?v`; it can lag ~10 min behind on Pages' cache.
+- Bump `?v=N` on `css/style.css` and `js/app.js` in `index.html` when shipping CSS/JS changes (now `v=5`). `js/art.js` has no `?v`; it can lag ~10 min behind on Pages' cache.
 - Hand cards get `cardSVG(t, { tight: true })` when overlapped (>8 px): icon shifts left into the visible strip. Laptop hand card width is 112 px in both `style.css` (`--cw`) and `handOverlap()` — change both together.
 - `npm test` takes ~30 s (the secrecy test plays three full games).
+- `js/fx.js` is a verbatim copy of `Board and Card Games/_fx/fx.js`: never edit it here. Game sounds/anims live in `js/sfx.js` (`FX.define` for snip/phew/snatch/roll/ominous).
+- fx's Speed buttons use `data-speed` like Computer speed: the Settings click handler skips anything inside `.fx-set`. Keep that guard.
+- `html.fx-noanim` (Animations off) kills every CSS animation/transition; `html.fx-fast` shortens deal/land/sheet/boom. Set by `fxClasses()` in app.js.
+- `fx.js` and `sfx.js` are imported with `?v=5`; bump with app.js.
 
 ## Decisions
 - Spare Defuses: 2 back in (1 with 5 players), per the 2025 publisher sheet; Party Pack: all.
@@ -51,6 +85,8 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 
 ## NOT verified
 - On a real iPhone (only WebKit headless at 393 px).
+- How the sounds actually sound: headless WebKit on Windows has no Web Audio, so only the calls were checked (spy on FX.play), not the audio. Confetti seen in Chrome headless (WebKit headless too slow to draw frames).
+- Sounds/animations in a live online room (mapping shares code with local play; not run with two browsers).
 - Party 10 speed on a real phone: node on a busy laptop, Medium decide avg 2.3 ms, max 223 ms; dial belief max 85 ms (target was under 50 ms). WebKit headless still shows paint gaps up to ~1 s on that busy machine, though our own render work averages 42 ms.
 - Online stall after a host reload (QA saw it once in ~9 runs; not reproduced).
 - Online with 3+ real people or across a host drop-out (the shared module's tests cover takeover; not run with this game).

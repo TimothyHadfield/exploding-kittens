@@ -178,6 +178,14 @@ main { min-height: 0; min-width: 0; position: relative; }
 .cover h2 { margin: 0; font-size: 24px; }
 .boom { position: fixed; inset: 0; pointer-events: none; z-index: 25; background: radial-gradient(circle, #ffb02e 0%, #e0523f 35%, transparent 70%); animation: boom .7s ease-out forwards; }
 @keyframes boom { from { opacity: .95; transform: scale(.3); } to { opacity: 0; transform: scale(2.2); } }
+/* Sound & effects settings (js/fx.js): Animations off = instant; Fast = shorter */
+.fx-noanim *, .fx-noanim *::before, .fx-noanim *::after { animation: none !important; transition: none !important; }
+.fx-fast .hand .card.new { animation-duration: .25s; }
+.fx-fast .discard .stack .cardsvg { animation-duration: .2s; }
+.fx-fast .sheet-wrap { animation-duration: .1s; }
+.fx-fast .sheet { animation-duration: .12s; }
+.fx-fast .boom { animation-duration: .4s; }
+#fxbox .fx-row { padding: 11px 0; border-top-color: var(--line); }
 .toast { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); background: var(--card-hover); border: 1px solid var(--line); padding: 8px 14px; border-radius: 10px; z-index: 40; font-size: 14px; animation: fade .2s; max-width: 90vw; }
 
 /* ------------------------------------------------ side info (cards tracker / log) */

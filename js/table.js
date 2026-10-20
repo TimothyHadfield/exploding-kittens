@@ -202,4 +202,5 @@ export function tableInput(t, isChange = false) {
   return false;
 }
 
-export const _test = { set: (x) => { T = { ...T, ...x }; }, get: () => T };
+export const tableEvents = () => T.events; // read-only use: sounds for new taps
+export const _test ={ set: (x) => { T = { ...T, ...x }; }, get: () => T };

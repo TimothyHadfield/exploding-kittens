@@ -6,7 +6,9 @@ import { decide, assess, placeWeights } from './ai.js';
 import { beliefFromLog } from './odds.js';
 import { cardSVG, backSVG } from './art.js';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML } from './ui.js';
-import { renderTable, tableClick, tableInput } from './table.js';
+import { renderTable, tableClick, tableInput, tableEvents } from './table.js';
+import './fx.js?v=5';
+import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=5';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js';
@@ -230,6 +232,7 @@ function onNet(snap) {
   if (!S.net) { S.localBak = { game: S.game, seats: S.seats, review: S.review }; S.game = null; S.review = []; S.gen++; clearTimeout(timer); }
   S.net = snap;
   S.screen = null;
+  let cues = null;
   if (snap.pub && snap.mySeat >= 0 && snap.mine) {
     const prev = S.game;
     const g = mergeView(snap.pub, snap.mine, snap.mySeat);
@@ -239,14 +242,21 @@ function onNet(snap) {
       name: x.name || 'Player ' + (i + 1), level: levels[i] || 'medium', online: x.online,
     }));
     if (prev) {
-      for (const e of g.log.slice(prev.log.length)) if (e.t === 'explode') boom();
+      // everyone hears every move: sounds come from what changed in the room
+      const fresh = g.log.slice(prev.log.length), cur = prev.cur, me = snap.mySeat;
+      cues = () => playCues(fresh, cur, (s) => s === me);
       const oldIds = new Set((prev.hands[snap.mySeat] || []).map((c) => c.id));
       S.newIds = new Set((g.hands[snap.mySeat] || []).filter((c) => !oldIds.has(c.id)).map((c) => c.id));
       if (g.turnNo !== prev.turnNo || g.phase !== prev.phase) S.hint = null;
-    } else S.seenLog = snap.status === 'playing' && g.turnNo > 1 ? g.log.length : 0;
+    } else {
+      S.seenLog = snap.status === 'playing' && g.turnNo > 1 ? g.log.length : 0;
+      // the game just started (not a reload mid-game): shuffle, deal, maybe your turn
+      if (snap.status === 'playing' && !g.log.some((e) => e.t === 'draw' || e.t === 'play')) { const me = snap.mySeat, log = g.log; cues = () => playCues(log, undefined, (s) => s === me); }
+    }
     S.game = g; S.viewer = snap.mySeat;
   } else S.game = null;
   if (S.tab === 'play') render();
+  if (cues) cues();
 }
 
 function renderLobby() {
@@ -276,7 +286,7 @@ async function createRoom() {
 }
 async function joinRoom() {
   const code = (($('#joincode') || {}).value || '').trim().toUpperCase();
-  if (!/^[A-Z0-9]{5}$/.test(code)) { toast('Type the 5-letter room code.'); return; }
+  if (!/^[A-Z0-9]{5}$/.test(code)) { FX.play('error'); toast('Type the 5-letter room code.'); return; }
   toast('Joining…');
   const r = await getNet().joinRoom(code, myName());
   if (!r.ok) { toast(r.message); if (S.net) { leaveNet(); render(); } }
@@ -295,6 +305,7 @@ function startGame() {
   S.gen++;
   save();
   step();
+  playCues(S.game.log, undefined);
 }
 
 const DELAY = { fast: 280, normal: 700, slow: 1200 };
@@ -319,7 +330,8 @@ function step() {
       if (gen !== S.gen || S.game !== g) return;
       const v = view(g, bot);
       const a = timed('bot', () => decide(v, S.seats[bot].level, Math.random));
-      act(a, true);
+      if (a.type === 'draw') tenseDraw(bot, true);
+      else act(a, true);
     }, d);
     return;
   }
@@ -348,20 +360,18 @@ function act(a, fromBot = false) {
     return;
   }
   let next;
-  try { next = timed('apply', () => apply(g, a)); } catch (e) { toast(e.message); return; }
+  try { next = timed('apply', () => apply(g, a)); } catch (e) { FX.play('error'); toast(e.message); return; }
   const before = g.log.length;
   S.game = next;
   const fresh = next.log.slice(before);
   S.newIds = new Set();
-  for (const e of fresh) {
-    if (e.t === 'explode') boom();
-  }
   // new cards in the viewer's hand get the deal-in animation
   const oldIds = new Set((g.hands[S.viewer] || []).map((c) => c.id));
   for (const c of next.hands[S.viewer] || []) if (!oldIds.has(c.id)) S.newIds.add(c.id);
   S.sel = []; S.hint = null;
   save();
   step();
+  playCues(fresh, g.cur); // after the redraw, so animations find the new screen
 }
 
 function summarize(v, a) {
@@ -383,6 +393,55 @@ function boom() {
   d.className = 'boom';
   document.body.appendChild(d);
   setTimeout(() => d.remove(), 800);
+}
+
+// ------------------------------------------------------------------ sound & effects (js/sfx.js -> js/fx.js)
+const FX = window.FX;
+function fxClasses() {
+  const s = FX.settings;
+  document.documentElement.classList.toggle('fx-noanim', !s.animations);
+  document.documentElement.classList.toggle('fx-fast', s.animations && s.animSpeed === 'fast');
+}
+FX.init({ game: 'exploding-kittens', accent: '#6ea8fe', onChange: fxClasses });
+defineSounds(FX);
+fxClasses();
+// where each cue's animation happens
+function fxEl(spec, role) {
+  if (spec && typeof spec === 'object') {
+    if (spec.seat === S.viewer) return role === 'from' ? $('#hand .card:last-child') : $('#hand');
+    const opp = $(`#p-opps .opp[data-seat="${spec.seat}"]`);
+    return opp && role === 'from' ? opp.querySelector('.mini') || opp : opp;
+  }
+  switch (spec) {
+    case 'deck': return $('#p-felt .deck .stack');
+    case 'discard': return $('#p-felt .discard .stack');
+    case 'felt': return $('#p-felt');
+    case 'hand': return $('#hand');
+    case 'turn': return $('#p-status b.you');
+    case 'dialHot': return S.settings.odds && S.danger >= DANGER ? $('#p-felt .dial .ring') : null;
+    case 'game': return S.tab === 'play' ? $('#v-play .game') : $(`#v-${S.tab} .panel`);
+    default: return null;
+  }
+}
+const FXDOM = { el: fxEl, boom };
+// mine(): the person holding this screen (every person in pass-the-phone)
+function playCues(events, cur, mine = isHuman) {
+  const seen = events.filter((e) => !e.vis || e.vis.some((s) => mine(s)));
+  runCues(cuesFor(seen, { mine, cur }), FX, FXDOM, { pace: S.settings.speed === 'fast' ? 0.6 : 1 });
+}
+// A risky draw gets a short drumroll and a shaking pile first (under 400 ms).
+function tenseDraw(seat, fromBot = false) {
+  if (S.drawing) return;
+  if (S.tab !== 'play' || !tensionOn(FX.settings, S.danger, S.settings.odds)) { act({ type: 'draw', seat }, fromBot); return; }
+  S.drawing = true;
+  const g = S.game, gen = S.gen;
+  FX.play('roll', isHuman(seat) ? undefined : { vol: 0.75 });
+  const d = fxEl('deck'); if (d) FX.shake(d);
+  setTimeout(() => {
+    S.drawing = false;
+    if (gen !== S.gen || S.game !== g) return;
+    act({ type: 'draw', seat }, fromBot);
+  }, 360);
 }
 
 // ------------------------------------------------------------------ odds helpers
@@ -442,6 +501,7 @@ function renderPlay() {
   const pE = b ? b.prob(0, 'E') : 0;
   const pU = b ? b.prob(0, 'U') : 0;
   const pDanger = pE + pU;
+  S.danger = pDanger; // for the drumroll before a risky draw
   const kittens = b ? b.nE + ((g.ikIn ?? g.deck.some((c) => c.t === 'IK')) ? 1 : 0) : 0;
   const dial = S.settings.odds ? `<div class="dial">${dialHTML(pDanger, 'next is a kitten')}
       <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. Computers hide kittens by habit (Hard: right where the next player draws), and the odds use that; when a person hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
@@ -462,7 +522,7 @@ function renderPlay() {
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
     const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="muted" style="font-weight:500;font-size:11px">away</span>' : '';
     const peek = study && v.hands ?`<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
-    return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}">${turnBadge}
+    return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}" data-seat="${s}">${turnBadge}
       <div class="nm">${esc(name(s))}${lvl ? ` <span class="muted" style="font-weight:500;font-size:11px">${lvl}</span>` : ''}${away}</div>
       <div class="meta">${g.alive[s] ? `<span class="mini"></span>${v.handCounts[s]}${v.defusesUsed[s] ? ` · <span title="Defuses used">D−${v.defusesUsed[s]}</span>` : ''}` : '💥 out'}</div>
       ${peek}<div class="think"><i></i><i></i><i></i></div></div>`;
@@ -674,9 +734,11 @@ function renderSettings() {
     </div></div>
     <div class="panel"><h2>Computer speed</h2>
       <div class="seg">${['slow', 'normal', 'fast'].map((k) => `<button data-speed="${k}" aria-pressed="${s.speed === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></div>
+    <div class="panel"><h2>Sound &amp; effects</h2><div id="fxbox"></div></div>
     <div class="panel"><h2>Online play</h2><p class="muted" style="margin:0;font-size:14px">On Play, set a seat to <b>Online friend</b> and tap <b>Create online room</b>. Friends type the room code under <b>Join a friend's game</b>. Free; unused rooms vanish after two days.</p></div>
     <p class="muted" style="font-size:12px;text-align:center">Fan-made study tool. Card names are facts about the game; all art here is original. ${VERSION}</p>
   </div></div>`;
+  FX.renderSettings($('#fxbox'));
 }
 
 // ------------------------------------------------------------------ events
@@ -686,9 +748,14 @@ function onClick(e) {
   const d = t.dataset;
   if (d.help) { toast(d.help); return; }
   if (d.tab) { setTab(d.tab); return; }
-  if (S.tab === 'table') { if (tableClick(t)) { render(); } return; }
+  if (S.tab === 'table') {
+    const n0 = tableEvents().length;
+    if (tableClick(t)) { render(); const ev = tableEvents(); if (ev.length > n0) runCues(tableCues(ev.slice(n0)), FX, FXDOM); }
+    return;
+  }
   if (S.tab === 'learn') { if (learnClick(t)) render(); return; }
   if (S.tab === 'settings') {
+    if (t.closest('.fx-set')) return; // Sound & effects handles its own rows
     if (d.speed) { S.settings.speed = d.speed; save(); render(); }
     return;
   }
@@ -729,7 +796,7 @@ function onClick(e) {
     S.hint = { cards: best.type === 'play' ? best.cards : [], text: hintText(v, best, A) };
     render(); return;
   }
-  if ('draw' in d) { act({ type: 'draw', seat: me }); return; }
+  if ('draw' in d) { tenseDraw(me); return; }
   if ('play' in d) {
     const hand = g.hands[me];
     const types = S.sel.map((id) => hand.find((c) => c.id === id).t);

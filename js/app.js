@@ -8,6 +8,8 @@ import { cardSVG, backSVG } from './art.js';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML } from './ui.js';
 import { renderTable, tableClick, tableInput } from './table.js';
 import { renderLearn, learnClick, learnInput } from './learn.js';
+import { game as NETGAME, mergeView } from './netgame.js';
+import { createOnline } from './online.js';
 
 export const VERSION = 'v1.0';
 const LS = 'ek:v1';
@@ -20,6 +22,7 @@ const S = {
   setup: { edition: 'original', players: 4, seats: null },
   game: null, seats: null, viewer: 0, shown: -1, sel: [], hint: null, review: [], seenLog: 0,
   gen: 0, sheet: null, newIds: new Set(),
+  net: null, localBak: null, // online room snapshot; the local game waits in localBak
 };
 
 function load() {
@@ -34,7 +37,8 @@ function load() {
 }
 function save() {
   try {
-    localStorage.setItem(LS, JSON.stringify({ settings: S.settings, setup: S.setup, game: S.game, seats: S.seats, review: S.review, tab: S.tab }));
+    const loc = S.net ? S.localBak || {} : S;
+    localStorage.setItem(LS, JSON.stringify({ settings: S.settings, setup: S.setup, game: loc.game || null, seats: loc.seats || null, review: loc.review || [], tab: S.tab }));
   } catch { /* private mode: play still works, just not saved */ }
 }
 export const settings = () => S.settings;
@@ -127,8 +131,9 @@ function renderSetup() {
         <option value="bot:easy" ${x.type === 'bot' && x.level === 'easy' ? 'selected' : ''}>Computer · Easy</option>
         <option value="bot:medium" ${x.type === 'bot' && x.level === 'medium' ? 'selected' : ''}>Computer · Medium</option>
         <option value="bot:hard" ${x.type === 'bot' && x.level === 'hard' ? 'selected' : ''}>Computer · Hard</option>
-        <option value="online" disabled>Online player (soon)</option>
+        <option value="online" ${x.type === 'online' ? 'selected' : ''}>Online friend</option>
       </select></div>`;
+  const anyOnline = su.seats.some((x) => x.type === 'online');
   const deckInfo = (() => {
     try {
       const g = newGame({ ...S.settings, edition: su.edition, players: su.players }, 1);
@@ -146,10 +151,101 @@ function renderSetup() {
     <div class="panel"><div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">Players</h2>
       <div class="stepper"><button data-players="-1" aria-label="Fewer players">−</button><b>${su.players}</b><button data-players="1" aria-label="More players">+</button></div></div>
       <div class="seats">${su.seats.map(seatRow).join('')}</div>
-      <p class="muted" style="font-size:12.5px;margin:8px 0 0">More than one human: pass the phone. Rule switches are in Settings.</p>
+      <p class="muted" style="font-size:12.5px;margin:8px 0 0">More than one human: pass the phone. Online friend: they play on their own phone. Rule switches are in Settings.</p>
+    </div>
+    <div class="panel"><h2>Join a friend's game ${help('Your friend sets a seat to Online friend and taps Create online room. Type the 5-letter code they see.')}</h2>
+      <div class="seats">
+        <div class="seat" style="grid-template-columns:1fr"><input id="joinname" value="${esc(su.myName || '')}" maxlength="12" placeholder="Your name" aria-label="Your name" data-myname></div>
+        <div class="seat" style="grid-template-columns:1fr auto"><input id="joincode" maxlength="5" placeholder="Room code" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="Room code" style="text-transform:uppercase;letter-spacing:2px"><button class="btn small" data-join>Join</button></div>
+      </div>
     </div>
   </div></div>
-  <div class="dealbar">${S.game && S.game.phase !== 'over' ? '<button class="btn" data-resume>Back to game</button>' : ''}<button class="btn primary" data-start style="min-height:52px;font-size:17px">Deal</button></div>`;
+  <div class="dealbar">${S.game && S.game.phase !== 'over' ? '<button class="btn" data-resume>Back to game</button>' : ''}${anyOnline ? '<button class="btn primary" data-create style="min-height:52px;font-size:17px">Create online room</button>' : '<button class="btn primary" data-start style="min-height:52px;font-size:17px">Deal</button>'}</div>`;
+}
+
+// ------------------------------------------------------------------ online
+let net = null;
+function getNet() {
+  if (!net) {
+    net = createOnline({ game: NETGAME, gameId: 'exploding-kittens', botDelayMs: 900 });
+    net.on('change', onNet);
+    net.on('error', (m) => toast(m));
+  }
+  return net;
+}
+const myName = () => {
+  const su = S.setup;
+  const seatName = (su.seats.find((x) => x.type === 'me') || {}).name;
+  return (su.myName || (seatName && seatName !== 'You' ? seatName : '') || 'Player').slice(0, 12);
+};
+function leaveNet() {
+  if (S.localBak) { S.game = S.localBak.game; S.seats = S.localBak.seats; S.review = S.localBak.review || []; }
+  else { S.game = null; S.seats = null; S.review = []; }
+  S.localBak = null; S.net = null; S.sheet = null; S.screen = 'setup';
+  S.seenLog = S.game ? S.game.log.length : 0;
+  closeSheet();
+}
+function onNet(snap) {
+  if (!snap || ['none', 'closed', 'left'].includes(snap.status)) {
+    if (S.net) {
+      if (snap && snap.status === 'closed') toast('The host closed the room.');
+      leaveNet(); render();
+    }
+    return;
+  }
+  if (!S.net) { S.localBak = { game: S.game, seats: S.seats, review: S.review }; S.game = null; S.review = []; S.gen++; clearTimeout(timer); }
+  S.net = snap;
+  S.screen = null;
+  if (snap.pub && snap.mySeat >= 0 && snap.mine) {
+    const prev = S.game;
+    const g = mergeView(snap.pub, snap.mine, snap.mySeat);
+    const levels = (snap.options && snap.options.levels) || [];
+    S.seats = snap.seats.map((x, i) => ({
+      type: i === snap.mySeat ? 'me' : x.kind === 'computer' ? 'bot' : 'remote',
+      name: x.name || 'Player ' + (i + 1), level: levels[i] || 'medium', online: x.online,
+    }));
+    if (prev) {
+      for (const e of g.log.slice(prev.log.length)) if (e.t === 'explode') boom();
+      const oldIds = new Set((prev.hands[snap.mySeat] || []).map((c) => c.id));
+      S.newIds = new Set((g.hands[snap.mySeat] || []).filter((c) => !oldIds.has(c.id)).map((c) => c.id));
+      if (g.turnNo !== prev.turnNo || g.phase !== prev.phase) S.hint = null;
+    } else S.seenLog = snap.status === 'playing' && g.turnNo > 1 ? g.log.length : 0;
+    S.game = g; S.viewer = snap.mySeat;
+  } else S.game = null;
+  if (S.tab === 'play') render();
+}
+
+function renderLobby() {
+  const n = S.net;
+  const root = $('#v-play');
+  if (n.status === 'joining' || !n.seats) { root.innerHTML = '<div class="cover"><h2>Joining…</h2><p class="muted">Waiting for the host to seat you.</p><button class="btn" data-leave>Cancel</button></div>'; return; }
+  const seatRow = (x, i) => `<div class="seat" style="grid-template-columns:26px 1fr auto;min-height:46px">
+      <span class="n">${i + 1}</span>
+      <span>${x.kind === 'empty' ? '<span class="muted">Waiting for a friend…</span>' : esc(x.name)}${i === n.mySeat ? ' <span class="muted">(you)</span>' : ''}${x.isHost ? ' <span class="muted">· host</span>' : ''}${x.kind === 'computer' ? ' <span class="muted">· computer</span>' : ''}</span>
+      ${n.isHost && i !== n.mySeat && x.kind !== 'human' ? `<button class="btn small" data-seatkind="${i}">${x.kind === 'empty' ? 'Use computer' : 'Open seat'}</button>` : ''}</div>`;
+  root.innerHTML = `<div class="scroll" style="flex:1"><div class="setup">
+    <div class="panel" style="text-align:center"><h2>Room code</h2><div class="roomcode">${esc(n.code || '')}</div>
+      <p class="muted" style="font-size:13px;margin:6px 0 0">Friends open this site, tap Play, and type the code under <b>Join a friend's game</b>.</p></div>
+    <div class="panel"><h2>Players</h2><div class="seats">${n.seats.map(seatRow).join('')}</div>
+      <p class="muted" style="font-size:12.5px;margin:8px 0 0">${EDITIONS[(n.options && n.options.edition) || 'original'].label} deck. Empty seats become computers when the game starts.</p></div>
+  </div></div>
+  <div class="dealbar"><button class="btn" data-leave>Leave</button>${n.isHost ? '<button class="btn primary" data-netstart style="min-height:52px;font-size:17px">Start game</button>' : '<span class="muted" style="flex:2;align-self:center;text-align:center">Waiting for the host to start…</span>'}</div>`;
+}
+
+async function createRoom() {
+  const su = S.setup;
+  const seats = su.seats.map((x) => (x.type === 'bot' ? { kind: 'computer', name: x.name } : x.type === 'online' ? 'empty' : 'human'));
+  const options = { edition: su.edition, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth, levels: su.seats.map((x) => (x.type === 'bot' ? x.level : null)) };
+  toast('Making a room…');
+  const r = await getNet().createRoom({ name: myName(), seats, options });
+  if (!r.ok) toast(r.message);
+}
+async function joinRoom() {
+  const code = (($('#joincode') || {}).value || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{5}$/.test(code)) { toast('Type the 5-letter room code.'); return; }
+  toast('Joining…');
+  const r = await getNet().joinRoom(code, myName());
+  if (!r.ok) { toast(r.message); if (S.net) { leaveNet(); render(); } }
 }
 
 // ------------------------------------------------------------------ game flow
@@ -172,6 +268,7 @@ let timer = null;
 function step() {
   clearTimeout(timer);
   const g = S.game;
+  if (S.net) { if (g) S.viewer = S.net.mySeat; render(); return; } // the host's browser runs the computers
   if (!g) { render(); return; }
   if (g.phase === 'over') { S.viewer = humans()[0] ?? 0; render(); return; }
   const gen = S.gen;
@@ -208,6 +305,13 @@ function act(a, fromBot = false) {
       const best = decide(v, 'hard', () => 0.5);
       S.review.push({ turn: g.turnNo, pE: A.pDeath, mine: summarize(v, a), best: summarize(v, best), same: sameAction(a, best), hasDef: A.hasDef });
     } catch { /* review is optional */ }
+  }
+  if (S.net) {
+    const { seat: _seat, ...move } = a;
+    S.sel = []; S.hint = null;
+    getNet().act(move).then((r) => { if (!r.ok) toast(r.message); });
+    render();
+    return;
   }
   let next;
   try { next = apply(g, a); } catch (e) { toast(e.message); return; }
@@ -284,13 +388,15 @@ function nopeRisk(v, rows) {
 // ------------------------------------------------------------------ in-game render
 function renderPlay() {
   const root = $('#v-play');
-  if (!S.game || S.screen === 'setup') { renderSetup(); return; }
+  if (S.net && (S.net.status !== 'playing' && S.net.status !== 'finished' || !S.game)) { renderLobby(); return; }
+  if (!S.net && (!S.game || S.screen === 'setup')) { renderSetup(); return; }
   const g = S.game;
   const me = S.viewer;
-  const v = view(g, S.settings.study ? -1 : me);
-  if (S.settings.study) { v.me = me; v.hand = v.hands[me]; v.log = view(g, me).log; v.pending = view(g, me).pending; }
+  const study = S.settings.study && !S.net; // never online: it would show other hands
+  const v = view(g, study ? -1 : me);
+  if (study) { v.me = me; v.hand = v.hands[me]; v.log = view(g, me).log; v.pending = view(g, me).pending; }
   const b = beliefFromLog(view(g, me).log, me);
-  const multiHuman = humans().length > 1;
+  const multiHuman = !S.net && humans().length > 1;
 
   // pass-the-phone cover
   if (multiHuman && S.shown !== me && g.phase !== 'over') {
@@ -302,7 +408,7 @@ function renderPlay() {
   const pE = b ? b.prob(0, 'E') : 0;
   const pU = b ? b.prob(0, 'U') : 0;
   const pDanger = pE + pU;
-  const kittens = b ? b.nE + (g.deck.some((c) => c.t === 'IK') ? 1 : 0) : 0;
+  const kittens = b ? b.nE + ((g.ikIn ?? g.deck.some((c) => c.t === 'IK')) ? 1 : 0) : 0;
   const dial = S.settings.odds ? `<div class="dial">${dialHTML(pDanger, 'next is a kitten')}
       <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. When someone else hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
       ${futureHTML(b)}
@@ -312,7 +418,7 @@ function renderPlay() {
   const deck = `<div class="pile deck ${v.deckCount ? '' : 'empty'}"><div class="stack">${backSVG()}
       ${ikPos >= 0 ? `<div class="ikup" style="top:${Math.min(96, 4 + ikPos * 3)}%" title="Face-up Imploding Kitten, ${ikPos} cards down"></div>` : ''}</div>
       <div class="lbl">${v.deckCount} left${ikPos >= 0 ? ` · IK at ${ikPos + 1}` : ''}</div>
-      ${S.settings.study && v.deck ? `<div class="lbl" style="font-size:10.5px">${v.deck.slice(0, 5).map((t) => CARD[t.replace('+', '')].short).join(' · ')}</div>` : ''}</div>`;
+      ${study && v.deck ? `<div class="lbl" style="font-size:10.5px">${v.deck.slice(0, 5).map((t) => CARD[t.replace('+', '')].short).join(' · ')}</div>` : ''}</div>`;
   const top = v.discard[v.discard.length - 1];
   const discard = `<div class="pile discard ${top ? '' : 'empty'}"><div class="stack" ${top ? `data-cardinfo="${top.t}"` : ''}>${top ? cardSVG(top.t) : `<svg viewBox="0 0 100 140" class="cardsvg"><rect x="2" y="2" width="96" height="136" rx="10" fill="none" stroke="#2a3042" stroke-dasharray="6 5" stroke-width="2"/></svg>`}</div>
       <div class="lbl">Discard · ${v.discard.length}</div></div>`;
@@ -320,9 +426,10 @@ function renderPlay() {
   const opps = g.hands.map((h, s) => s).filter((s) => s !== me).map((s) => {
     const turnBadge = g.cur === s && g.turns > 1 ? `<span class="badge">${g.turns}×</span>` : '';
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
-    const peek = S.settings.study && v.hands ? `<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
+    const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="muted" style="font-weight:500;font-size:11px">away</span>' : '';
+    const peek = study && v.hands ?`<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
     return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}">${turnBadge}
-      <div class="nm">${esc(name(s))}${lvl ? ` <span class="muted" style="font-weight:500;font-size:11px">${lvl}</span>` : ''}</div>
+      <div class="nm">${esc(name(s))}${lvl ? ` <span class="muted" style="font-weight:500;font-size:11px">${lvl}</span>` : ''}${away}</div>
       <div class="meta">${g.alive[s] ? `<span class="mini"></span>${v.handCounts[s]}${v.defusesUsed[s] ? ` · <span title="Defuses used">D−${v.defusesUsed[s]}</span>` : ''}` : '💥 out'}</div>
       ${peek}<div class="think"><i></i><i></i><i></i></div></div>`;
   }).join('');
@@ -396,15 +503,21 @@ function renderPrompt(v, b, rows, lines) {
   const sawNew = g.log.slice(S.seenLog).filter((e) => e.t === 'saw' && e.vis && e.vis.includes(me) && g.phase !== 'alter');
   S.seenLog = g.log.length;
 
+  if (S.sheet === 'room' && S.net) {
+    sheet(`<h3>Online room ${esc(S.net.code || '')}</h3><p>${S.net.isHost ? 'You are the host: the computers run on this phone. If you leave, another player takes over.' : 'If you leave, a computer takes your seat.'}</p>
+      <div class="btns"><button class="btn danger" data-leave>Leave room</button><button class="btn" data-close>Close</button></div>`);
+    return;
+  }
   if (g.phase === 'over') {
-    const won = isHuman(g.winner);
+    const won = S.net ? g.winner === me : isHuman(g.winner);
     const rv = S.review;
     const same = rv.filter((r) => r.same).length;
     const worst = rv.filter((r) => !r.same).sort((a, b) => b.pE - a.pE).slice(0, 4);
-    sheet(`<h3>${won ? (humans().length > 1 ? esc(name(g.winner)) + ' wins!' : 'You win! 🏆') : esc(name(g.winner)) + ' wins'}</h3>
+    const btns = S.net ? '<button class="btn primary" data-leave>Leave room</button>' : '<button class="btn" data-setup>Change setup</button><button class="btn primary" data-again>Play again</button>';
+    sheet(`<h3>${won ? (!S.net && humans().length > 1 ? esc(name(g.winner)) + ' wins!' : 'You win! 🏆') : esc(name(g.winner)) + ' wins'}</h3>
       ${rv.length ? `<p>Your choices matched the Hard computer <b>${same} of ${rv.length}</b> times. ${help('After each of your turn moves we asked the Hard computer what it would do with the same cards and the same knowledge.')}</p>
       ${worst.length ? `<ul class="review">${worst.map((r) => `<li>Kitten chance <b style="color:${pctColor(r.pE)}">${fmtPct(r.pE)}</b>: you chose <b>${esc(r.mine)}</b>, Hard would <b>${esc(r.best)}</b>.</li>`).join('')}</ul>` : ''}` : ''}
-      <div class="btns"><button class="btn" data-setup>Change setup</button><button class="btn primary" data-again>Play again</button></div>`);
+      <div class="btns">${btns}</div>`);
     return;
   }
   if (S.sheet === 'info') {
@@ -504,7 +617,7 @@ function renderSettings() {
     </div></div>
     <div class="panel"><h2>Computer speed</h2>
       <div class="seg">${['slow', 'normal', 'fast'].map((k) => `<button data-speed="${k}" aria-pressed="${s.speed === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></div>
-    <div class="panel"><h2>Online play</h2><p class="muted" style="margin:0;font-size:14px">Coming soon: play with friends on their own phones. For now, pass one phone around.</p></div>
+    <div class="panel"><h2>Online play</h2><p class="muted" style="margin:0;font-size:14px">On Play, set a seat to <b>Online friend</b> and tap <b>Create online room</b>. Friends type the room code under <b>Join a friend's game</b>. Free; unused rooms vanish after two days.</p></div>
     <p class="muted" style="font-size:12px;text-align:center">Fan-made study tool. Card names are facts about the game; all art here is original. ${VERSION}</p>
   </div></div>`;
 }
@@ -527,6 +640,16 @@ function onClick(e) {
   if (d.edition) { S.setup.edition = d.edition; save(); render(); return; }
   if (d.players) { S.setup.players += +d.players; save(); render(); return; }
   if ('start' in d) { S.screen = null; startGame(); return; }
+  if ('create' in d) { createRoom(); return; }
+  if ('join' in d) { joinRoom(); return; }
+  if ('leave' in d) { const n = net; leaveNet(); render(); if (n) n.leave(); return; }
+  if ('netstart' in d) { getNet().start().then((r) => { if (!r.ok) toast(r.message); }); return; }
+  if (d.seatkind) {
+    const i = +d.seatkind;
+    getNet().setSeat(i, S.net.seats[i].kind === 'empty' ? 'computer' : 'empty').then((r) => { if (!r.ok) toast(r.message); });
+    return;
+  }
+  if ('newgame' in d && S.net) { S.sheet = 'room'; render(); return; }
   if ('resume' in d) { S.screen = null; render(); return; }
   if ('reveal' in d) { S.shown = S.viewer; render(); return; }
   if ('newgame' in d) { S.screen = 'setup'; closeSheet(); render(); return; }
@@ -624,6 +747,7 @@ function onInput(e) {
     const sp = $('#spot'); if (sp) sp.textContent = spotLabel(S.place, S.game.deck.length);
     return;
   }
+  if (t.dataset.myname != null) { S.setup.myName = t.value.slice(0, 12); save(); return; }
   if (t.dataset.seatname != null) { S.setup.seats[+t.dataset.seatname].name = t.value.slice(0, 12) || 'Player'; save(); return; }
 }
 function onChange(e) {
@@ -632,7 +756,9 @@ function onChange(e) {
   if (t.dataset.seattype != null) {
     const i = +t.dataset.seattype; const [type, level] = t.value.split(':');
     const seat = S.setup.seats[i];
-    S.setup.seats[i] = type === 'bot' ? { type, level, name: seat.type === 'bot' ? seat.name : BOT_NAMES[i % 9] } : { type: 'me', name: seat.type === 'bot' ? (i === 0 ? 'You' : 'Player ' + (i + 1)) : seat.name };
+    S.setup.seats[i] = type === 'bot' ? { type, level, name: seat.type === 'bot' ? seat.name : BOT_NAMES[i % 9] }
+      : type === 'online' ? { type, name: 'Friend' }
+      : { type: 'me', name: seat.type !== 'me' ? (i === 0 ? 'You' : 'Player ' + (i + 1)) : seat.name };
     save(); render();
   }
   if (S.tab === 'table' && tableInput(t, true)) render();
@@ -647,6 +773,8 @@ document.addEventListener('input', onInput);
 document.addEventListener('change', onChange);
 setTab(S.tab);
 if (S.game && S.game.phase !== 'over') step();
+// back into an online room after a reload (loads nothing unless a room was saved)
+try { if (localStorage.getItem('online.exploding-kittens')) getNet().resume(); } catch { /* storage blocked */ }
 
 // for tests / debugging in the console
-window.EK = { S, act, step, view: () => S.game && view(S.game, S.viewer) };
+window.EK = { S, act, step, view: () => S.game && view(S.game, S.viewer), net: () => net };

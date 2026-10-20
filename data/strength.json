@@ -1,25 +1,25 @@
 {
- "games": 100,
- "measured": "2026-10-20",
+ "games": 2000,
+ "measured": "2026-10-19",
  "heads": {
   "hard-easy": {
-   "hard": 99,
-   "easy": 1
+   "hard": 99.3,
+   "easy": 0.8
   },
   "hard-medium": {
-   "hard": 80,
-   "medium": 20
+   "hard": 78.1,
+   "medium": 21.9
   },
   "medium-easy": {
-   "medium": 94,
-   "easy": 6
+   "medium": 91.6,
+   "easy": 8.3
   }
  },
  "table": {
   "four": {
-   "hard": 46,
-   "medium": 24,
-   "easy": 6
+   "hard": 44.5,
+   "medium": 24.9,
+   "easy": 5.8
   },
   "allHard4": {
    "hard": 25

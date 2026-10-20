@@ -117,6 +117,20 @@ main { min-height: 0; min-width: 0; position: relative; }
 .opp .think i:nth-child(2) { animation-delay: .2s; } .opp .think i:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 50% { opacity: .2; } }
 .opp .peek { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 3px; }
+/* seats round the far side: the outer ones sit a little lower, like at a real table */
+.opp { margin-top: calc(var(--arc, 0px) * .25); }
+/* a crowded table (6+ players on a phone): every seat stays on screen, smaller */
+.opps.crowd { gap: 3px; padding-left: 6px; padding-right: 6px; overflow: visible; }
+.opps.crowd .opp { flex: 1 1 0; min-width: 0; max-width: 76px; padding: 0; }
+.opps.crowd .opp .nm { font-size: 10.5px; line-height: 15px; padding: 1px 4px; }
+.opps.crowd .opp .nm .lvl, .opps.crowd .opp .meta .du { display: none; }
+.opps.crowd .opp .meta { position: relative; min-height: 26px; }
+.opps.crowd .opp .mini { --bw: 13px; --step: 3px; }
+.opps.crowd .opp .meta .cnt { position: absolute; right: -4px; bottom: -3px; font-size: 10.5px; line-height: 14px; padding: 0 3px; border-radius: 6px; background: rgba(12, 14, 20, .82); }
+.opps.crowd .opp .badge { right: -2px; font-size: 10px; padding: 0 4px; }
+/* a very big hand slides sideways instead of squeezing cards too thin to tap */
+.hand.scrolls { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+.hand.scrolls::-webkit-scrollbar { display: none; }
 .opp .peek span { font-size: 9.5px; padding: 0 3px; border-radius: 3px; color: #17130f; font-weight: 700; }
 
 .felt { min-height: 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: center; padding: 6px 10px; gap: 8px; }
@@ -125,7 +139,8 @@ main { min-height: 0; min-width: 0; position: relative; }
 .pile .stack .cardsvg { display: block; width: 100%; height: auto; }
 /* draw pile: card edges under the top card, as thick as the cards left in it */
 .deck .stack { box-shadow: var(--stk); transform: translateY(var(--rise, 0)); }
-.deck.empty .stack, .discard.empty .stack { border: 2px dashed rgba(255, 255, 255, .25); background: rgba(0, 0, 0, .12); }
+/* an empty pile is just bare table: a faint worn patch where the cards were */
+.deck.empty .stack, .discard.empty .stack { background: radial-gradient(closest-side, rgba(0, 0, 0, .16), rgba(0, 0, 0, .06) 70%, transparent); }
 /* discard: a messy face-up pile */
 .discard .stack .pc { position: absolute; inset: 0; }
 .discard .stack .pc .cardsvg { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .35)) drop-shadow(0 3px 5px rgba(0, 0, 0, .3)); }
@@ -256,6 +271,8 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
   .opps { justify-content: center; align-items: flex-start; }
   .opp { flex: 0 1 170px; max-width: 190px; margin-top: var(--arc, 0px); }
   .opp .mini { --bw: 26px; --step: 7px; }
+  .opps.crowd .opp { max-width: 100px; }
+  .opps.crowd .opp .mini { --bw: 18px; --step: 4px; }
   .opp .outcard { width: 32px; }
   .opp .meta { min-height: 42px; }
   .pile { width: 150px; }

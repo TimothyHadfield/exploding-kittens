@@ -4,15 +4,16 @@ import { CARD, EDITIONS, boxFor } from './cards.js';
 import { newGame, apply, view, waitingOn, comboKind } from './engine.js';
 import { decide, assess, placeWeights } from './ai.js';
 import { beliefFromLog } from './odds.js';
-import { cardSVG, backSVG } from './art.js';
+import { cardSVG, backSVG } from './art.js?v=7';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML, settingsTap } from './ui.js';
 import { renderTable, tableClick, tableInput, tableEvents } from './table.js';
-import './fx.js?v=6';
-import './tablekit.js?v=6';
-import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=6';
+import './fx.js?v=7';
+import './tablekit.js?v=7';
+import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=7';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js';
+import { seenAfterReload, fanWidth, crowded, keepSel } from './guards.js?v=7';
 
 export const VERSION = 'v1.0';
 const LS = 'ek:v1';
@@ -43,7 +44,7 @@ function load() {
         myName: typeof su.myName === 'string' ? su.myName.slice(0, 12) : '',
       };
     }
-    if (d.game && d.game.log && d.game.hands && Array.isArray(d.seats)) { S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = d.game.log.length; }
+    if (d.game && d.game.log && d.game.hands && Array.isArray(d.seats)) { S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = seenAfterReload(d.game.log); }
     if (d.tab) S.tab = d.tab;
   } catch { /* storage blocked: start fresh */ }
 }
@@ -137,6 +138,27 @@ function setTab(t, how = 'push') {
   save();
 }
 
+const histState = () => { try { return history.state || {}; } catch { return {}; } };
+const pushHist = (st) => { try { history.pushState(st, ''); } catch { /* history not available */ } };
+// Menu (setup) during a game is its own Back step, and the computers wait
+// while it's open so typing there isn't interrupted.
+function openMenu() {
+  S.screen = 'setup'; S.sheet = null; closeSheet(); clearTimeout(timer);
+  if (S.game && histState().screen !== 'setup') pushHist({ tab: 'play', screen: 'setup' });
+  render();
+}
+function resumeGame() { S.screen = null; render(); step(); }
+function onPop(e) {
+  const st = (e && e.state) || {};
+  if (!S.net && S.tab === 'play' && st.tab === 'play') {
+    if (S.sheet === 'info' && st.sheet !== 'info') { S.sheet = null; closeSheet(); render(); return; }
+    if (st.screen === 'setup' && S.game) { S.screen = 'setup'; clearTimeout(timer); closeSheet(); render(); return; }
+    if (st.screen !== 'setup' && S.screen === 'setup' && S.game) { resumeGame(); return; }
+  }
+  if (S.sheet === 'info') { S.sheet = null; closeSheet(); }
+  if (st.tab) setTab(st.tab, 'none');
+}
+
 // Timing probe for tests: window.EK.perf collects ms per step when switched on.
 const perf = { on: false, t: {} };
 function timed(k, f) {
@@ -146,7 +168,7 @@ function timed(k, f) {
 }
 // Game moves only redraw the Play tab; redrawing Table or Learn would reset
 // what the person is reading or typing there.
-function renderIfPlay() { if (S.tab === 'play') render(); }
+function renderIfPlay() { if (S.tab === 'play' && (S.net || S.screen !== 'setup')) render(); }
 function render() {
   if (S.tab === 'play') timed('render', renderPlay);
   else if (S.tab === 'table') $('#v-table').innerHTML = renderTable();
@@ -319,6 +341,7 @@ function step() {
   if (S.net) { if (g) S.viewer = S.net.mySeat; renderIfPlay(); return; } // the host's browser runs the computers
   if (!g) { renderIfPlay(); return; }
   if (g.phase === 'over') { S.viewer = humans()[0] ?? 0; renderIfPlay(); return; }
+  if (S.screen === 'setup') return; // Menu open: the computers wait (resumeGame restarts them)
   const gen = S.gen;
   const waiting = waitingOn(g);
   const bot = waiting.find((s) => !isHuman(s));
@@ -331,6 +354,8 @@ function step() {
     const d = g.phase === 'nope' ? 380 : DELAY[S.settings.speed] || 700;
     timer = setTimeout(() => {
       if (gen !== S.gen || S.game !== g) return;
+      // page in the background: the computers wait until you look again
+      if (document.hidden) { S.waitVisible = true; return; }
       const v = view(g, bot);
       const a = timed('bot', () => decide(v, S.seats[bot].level, Math.random));
       if (a.type === 'draw') tenseDraw(bot, true);
@@ -541,13 +566,16 @@ function renderPlay() {
   // Seats round the far side: name plate, the backs of their held hand, and
   // the face-up kitten in front of anyone who exploded.
   const oppSeats = g.hands.map((h, s) => s).filter((s) => s !== me);
+  // more seats than fit at their normal size: shrink them so none is off screen
+  const oppsEl = $('#p-opps');
+  const crowd = crowded(oppSeats.length, LAPTOP.matches ? (oppsEl && oppsEl.clientWidth) || innerWidth - 520 : innerWidth, LAPTOP.matches);
   const opps = oppSeats.map((s, i) => {
     const turnBadge = g.cur === s && g.turns > 1 ? `<span class="badge">${g.turns}×</span>` : '';
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
     const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="lvl">away</span>' : '';
     const peek = study && v.hands ?`<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
     const n = oppSeats.length, t = n > 1 ? Math.abs((i / (n - 1)) * 2 - 1) : 0;
-    const k = Math.min(7, v.handCounts[s]);
+    const k = Math.min(crowd ? 4 : 7, v.handCounts[s]);
     const backs = Array.from({ length: k }, (_, b) => `<i style="--i:${b};--r:${k > 1 ? ((b / (k - 1)) * 2 - 1) * 14 : 0}deg"></i>`).join('');
     return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}" data-seat="${s}" style="--arc:${Math.round(t * t * 30)}px">${turnBadge}
       <div class="nm">${esc(name(s))}${lvl ? ` <span class="lvl">${lvl}</span>` : ''}${away}</div>
@@ -572,9 +600,13 @@ function renderPlay() {
     : !g.alive[me] ? `<div class="fanbox outme">${cardSVG('EK')}</div>` : '';
 
   // play button
+  // a picked card can leave the hand (stolen, given away): forget it
+  S.sel = keepSel(S.sel, hand);
   const selTypes = S.sel.map((id) => (hand.find((c) => c.id === id) || {}).t).filter(Boolean);
-  const kind = selTypes.length ? comboKind(selTypes, g.cfg.five) : null;
-  const playLabel = !selTypes.length ? 'Play' : !kind ? 'Not a play' : kind === 'single' ? `Play ${CARD[selTypes[0]].short}` : kind === 'pair' ? 'Play pair' : kind === 'triple' ? 'Play 3 of a kind' : 'Play 5 different';
+  const kind0 = selTypes.length ? comboKind(selTypes, g.cfg.five) : null;
+  const noDiscard = kind0 === 'five' && !v.discard.length; // nothing to take yet
+  const kind = noDiscard ? null : kind0;
+  const playLabel = !selTypes.length ? 'Play' : noDiscard ? 'Discard is empty' : !kind ? 'Not a play' : kind === 'single' ? `Play ${CARD[selTypes[0]].short}` : kind === 'pair' ? 'Play pair' : kind === 'triple' ? 'Play 3 of a kind' : 'Play 5 different';
   const rows = b ? trackerRows(v, b) : [];
   const risk = kind && S.settings.odds ? nopeRisk(view(g, me), rows) : 0;
 
@@ -601,6 +633,7 @@ function renderPlay() {
     </div>`;
   }
   const patch = (id, html) => timed('p.' + id, () => { const el = document.getElementById(id); if (el && el._html !== html) { el.innerHTML = html; el._html = html; return true; } return false; });
+  $('#p-opps').classList.toggle('crowd', crowd);
   patch('p-opps', opps);
   patch('p-felt', deck + dial + discard);
   patch('p-status', `<div class="grow">${status}</div>
@@ -608,7 +641,7 @@ function renderPlay() {
         <button class="btn small ghost" data-newgame>${g.phase === 'over' ? 'New' : 'Menu'}</button>`);
   patch('p-hint', S.hint ? esc(S.hint.text) : '');
   const handEl = $('#hand');
-  handEl.className = 'hand' + (myTurn ? '' : ' notmine');
+  handEl.className = 'hand' + (myTurn ? '' : ' notmine') + (fan.scrolls ? ' scrolls' : '');
   root.querySelector('.game').classList.toggle('myturn', myTurn);
   handEl.style.setProperty('--hand-h', fan.H + 'px');
   const newIds = S.newIds;
@@ -633,12 +666,15 @@ function handFan(n) {
   const lap = innerWidth >= 900;
   const cw = lap ? 112 : innerWidth <= 360 ? 58 : 66, ch = cw * 1.4;
   const side = !lap && innerHeight <= 500 && innerWidth > innerHeight; // phone sideways: hand gets the right column
-  const W = Math.round(lap ? Math.min(innerWidth - 200 - 320, 900) - 32 : side ? (innerWidth * 1.1) / 2.1 - 16 : innerWidth - 16);
+  const W0 = Math.round(lap ? Math.min(innerWidth - 200 - 320, 900) - 32 : side ? (innerWidth * 1.1) / 2.1 - 16 : innerWidth - 16);
   const maxRot = lap ? 10 : 14;
+  // a huge hand (Party Pack, lots of steals) never squeezes a card below a
+  // finger's width: the fan gets wider than the screen and slides sideways
+  const { W, scrolls } = fanWidth({ n, cw, ch, width: W0, maxRot, minStep: lap ? 16 : 18 });
   const L = T.fanLayout(n, { width: W, cardW: cw, cardH: ch, spread: lap ? 0.8 : 0.62, maxRot });
   const drop = L.length ? Math.max(...L.map((p) => p.y)) : 0;
   const maxDrop = (1 - Math.cos((maxRot * Math.PI) / 180)) * ch * 3;
-  return { L, cw, W, drop, H: Math.ceil(ch + maxDrop + 22) };
+  return { L, cw, W, drop, scrolls, H: Math.ceil(ch + maxDrop + 22) };
 }
 
 const animSpeed = () => (FX.settings.animSpeed === 'fast' ? 0.55 : 1);
@@ -683,7 +719,17 @@ function playOnto(rects) {
 const ORDER = ['DEF', 'NOPE', 'ATK', 'TATK', 'SKIP', 'REV', 'STF', 'ALTER', 'SHUF', 'BOTTOM', 'FAV', 'FERAL', 'TACO', 'MELON', 'POTATO', 'BEARD', 'RAINBOW'];
 const order = (t) => ORDER.indexOf(t);
 
+// When a different sheet pops up (its heading changed), note the time: taps
+// on it in the next moment are the tail of a double-tap and are ignored.
+const sheetSeen = { el: null, key: '', at: 0 };
 function renderPrompt(v, b, rows, lines) {
+  renderPromptInner(v, b, rows, lines);
+  const w = document.getElementById('sheet');
+  const h = w && w.querySelector('h3');
+  const key = h ? h.textContent : '';
+  if (w !== sheetSeen.el || key !== sheetSeen.key) Object.assign(sheetSeen, { el: w, key, at: w ? Date.now() : 0 });
+}
+function renderPromptInner(v, b, rows, lines) {
   const g = S.game;
   const me = S.viewer;
   const p = v.pending;
@@ -725,7 +771,8 @@ function renderPrompt(v, b, rows, lines) {
     S.sheet = { type: 'saw', cards };
   }
   if (S.sheet && S.sheet.type === 'saw') {
-    sheet(`<h3>The top ${S.sheet.cards.length} cards</h3><p>Left is the next card drawn.</p>
+    const nSaw = S.sheet.cards.length;
+    sheet(`<h3>${nSaw === 1 ? 'The last card in the pile' : `The top ${nSaw} cards`}</h3><p>${nSaw === 1 ? 'It is the next card drawn.' : 'Left is the next card drawn.'}</p>
       <div class="cards-pick">${S.sheet.cards.map((t) => `<button tabindex="-1">${cardSVG(t.replace('+', ''), { up: t.endsWith('+') })}</button>`).join('')}</div>
       <div class="btns"><button class="btn primary" data-close>Got it</button></div>`);
     return;
@@ -759,7 +806,7 @@ function renderPrompt(v, b, rows, lines) {
   if (g.phase === 'alter' && p && p.seat === me) {
     if (!S.alter || S.alter.n !== g.log.length) S.alter = { n: g.log.length, order: p.top.map((c) => c.id), pick: null };
     const byId = Object.fromEntries(p.top.map((c) => [c.id, c]));
-    sheet(`<h3>Alter the Future</h3><p>Tap two cards to swap them. Left is drawn first.</p>
+    sheet(`<h3>Alter the Future</h3><p>${p.top.length > 1 ? 'Tap two cards to swap them. Left is drawn first.' : 'Only one card is left, so there is nothing to swap.'}</p>
       <div class="cards-pick">${S.alter.order.map((id) => `<button data-swap="${id}" class="${S.alter.pick === id ? 'on' : ''}">${cardSVG(byId[id].t.replace('+', ''), { up: byId[id].t.endsWith('+') })}</button>`).join('')}</div>
       <div class="btns"><button class="btn primary" data-alterdone>Done</button></div>`);
     return;
@@ -781,8 +828,10 @@ function promptTarget() {
   const sh = S.sheet;
   const self = sh.allowSelf;
   const seats = g.alive.map((a, i) => (a && (self || i !== me) ? i : -1)).filter((i) => i >= 0);
+  // two players with the same name get their seat number, so the buttons differ
+  const label = (s) => (s === me ? 'You' : esc(name(s)) + (seats.some((o) => o !== s && o !== me && name(o) === name(s)) ? ` <span class="muted">· seat ${s + 1}</span>` : ''));
   sheet(`<h3>${esc(sh.title)}</h3><p>Pick a player.</p>
-    <div class="choices">${seats.map((s) => `<button class="btn" data-target="${s}"><b>${s === me ? 'You' : esc(name(s))}</b><small class="muted">${g.hands[s].length} cards</small></button>`).join('')}</div>
+    <div class="choices">${seats.map((s) => `<button class="btn" data-target="${s}"><b>${label(s)}</b><small class="muted">${g.hands[s].length} cards</small></button>`).join('')}</div>
     <div class="btns"><button class="btn ghost" data-close>Cancel</button></div>`);
 }
 function promptName() {
@@ -822,6 +871,8 @@ function renderSettings() {
 function onClick(e) {
   const t = e.target.closest('button, [data-cardinfo]');
   if (!t) return;
+  // the second tap of a double-tap must not land on a sheet that just popped up
+  if (t.closest('#sheet') && Date.now() - sheetSeen.at < 320) return;
   const d = t.dataset;
   if (d.help) { toast(d.help); return; }
   if (d.tab) { setTab(d.tab); return; }
@@ -839,7 +890,7 @@ function onClick(e) {
   const g = S.game;
   if (d.edition) { S.setup.edition = d.edition; save(); render(); return; }
   if (d.players) { S.setup.players += +d.players; save(); render(); return; }
-  if ('start' in d) { S.screen = null; startGame(); return; }
+  if ('start' in d) { S.screen = null; try { history.replaceState({ tab: 'play' }, ''); } catch { /* no history */ } startGame(); return; }
   if ('create' in d) { createRoom(); return; }
   if ('join' in d) { joinRoom(); return; }
   if ('leave' in d) { const n = net; leaveNet(); render(); if (n) n.leave(); return; }
@@ -850,13 +901,12 @@ function onClick(e) {
     return;
   }
   if ('newgame' in d && S.net) { S.sheet = 'room'; render(); return; }
-  if ('resume' in d) { S.screen = null; render(); return; }
+  if ('resume' in d) { if (histState().screen === 'setup') history.back(); else resumeGame(); return; }
   if ('reveal' in d) { S.shown = S.viewer; render(); return; }
-  if ('newgame' in d) { S.screen = 'setup'; closeSheet(); render(); return; }
+  if ('newgame' in d || 'setup' in d) { openMenu(); return; }
   if ('again' in d) { closeSheet(); startGame(); return; }
-  if ('setup' in d) { S.screen = 'setup'; closeSheet(); render(); return; }
-  if ('close' in d) { S.sheet = null; closeSheet(); render(); return; }
-  if (d.sheet === 'info') { S.sheet = 'info'; render(); return; }
+  if ('close' in d) { if (S.sheet === 'info' && histState().sheet === 'info') { history.back(); return; } S.sheet = null; closeSheet(); render(); return; }
+  if (d.sheet === 'info') { S.sheet = 'info'; pushHist({ tab: 'play', sheet: 'info' }); render(); return; }
   if (!g) return;
   const me = S.viewer;
   if (d.card) {
@@ -872,12 +922,17 @@ function onClick(e) {
     S.hint = { cards: best.type === 'play' ? best.cards : [], text: hintText(v, best, A) };
     render(); return;
   }
-  if ('draw' in d) { tenseDraw(me); return; }
+  // a fast double-tap on Draw or Play counts once (with 2 attacked turns the
+  // second tap would otherwise draw again)
+  if (('draw' in d || 'play' in d) && Date.now() - (S.lastTap || 0) < 450) return;
+  if ('draw' in d) { S.lastTap = Date.now(); tenseDraw(me); return; }
   if ('play' in d) {
     const hand = g.hands[me];
-    const types = S.sel.map((id) => hand.find((c) => c.id === id).t);
-    const kind = comboKind(types, g.cfg.five);
-    if (!kind) return;
+    const types = S.sel.map((id) => (hand.find((c) => c.id === id) || {}).t);
+    const kind = types.every(Boolean) ? comboKind(types, g.cfg.five) : null;
+    if (!kind) { S.sel = keepSel(S.sel, hand); render(); return; }
+    if (kind === 'five' && !g.discard.length) return;
+    S.lastTap = Date.now();
     if (kind === 'pair' || kind === 'triple' || types[0] === 'FAV' || (kind === 'single' && types[0] === 'TATK')) {
       S.sheet = { type: 'target', kind, cards: S.sel.slice(), allowSelf: kind === 'single' && types[0] === 'TATK', title: kind === 'pair' ? 'Steal a random card from…' : kind === 'triple' ? 'Ask who?' : types[0] === 'FAV' ? 'Ask a Favor from…' : 'Targeted Attack on…' };
       render(); return;
@@ -886,12 +941,14 @@ function onClick(e) {
   }
   if (d.target) {
     const sh = S.sheet; const tg = +d.target;
+    if (!sh || !sh.cards) return;
     if (sh.kind === 'triple') { S.sheet = { ...sh, type: 'name', target: tg }; render(); return; }
     S.sheet = null; closeSheet();
     act({ type: 'play', seat: me, cards: sh.cards, target: tg }); return;
   }
   if (d.name) {
-    const sh = S.sheet; S.sheet = null; closeSheet();
+    const sh = S.sheet; if (!sh || !sh.cards) return;
+    S.sheet = null; closeSheet();
     act({ type: 'play', seat: me, cards: sh.cards, target: sh.target, name: d.name }); return;
   }
   if ('pass' in d) { closeSheet(); act({ type: 'pass', seat: me }); return; }
@@ -904,6 +961,7 @@ function onClick(e) {
   }
   if ('insert' in d) { const pos = S.place || 0; S.place = null; closeSheet(); act({ type: 'insert', seat: me, pos: Math.min(pos, g.deck.length) }); return; }
   if (d.swap) {
+    if (!S.alter) return;
     const id = +d.swap;
     if (S.alter.pick == null) S.alter.pick = id;
     else if (S.alter.pick === id) S.alter.pick = null;
@@ -913,7 +971,7 @@ function onClick(e) {
     }
     render(); return;
   }
-  if ('alterdone' in d) { const order = S.alter.order; S.alter = null; closeSheet(); act({ type: 'alter', seat: me, order }); return; }
+  if ('alterdone' in d) { if (!S.alter) return; const order = S.alter.order; S.alter = null; closeSheet(); act({ type: 'alter', seat: me, order }); return; }
   if (d.pick) { closeSheet(); act({ type: 'pick', seat: me, card: +d.pick }); return; }
   if (d.cardinfo) { toast(`${CARD[d.cardinfo].name}: ${CARD[d.cardinfo].text}`); }
 }
@@ -948,7 +1006,7 @@ function onInput(e) {
     return;
   }
   if (t.dataset.myname != null) { S.setup.myName = t.value.slice(0, 12); save(); return; }
-  if (t.dataset.seatname != null) { S.setup.seats[+t.dataset.seatname].name = t.value.slice(0, 12) || 'Player'; save(); return; }
+  if (t.dataset.seatname != null) { S.setup.seats[+t.dataset.seatname].name = t.value.trim().slice(0, 12) || 'Player ' + (+t.dataset.seatname + 1); save(); return; }
 }
 function onChange(e) {
   const t = e.target;
@@ -974,7 +1032,28 @@ document.addEventListener('change', onChange);
 // the hand fan is laid out for the screen width: redo it after a rotate / resize
 let resizeT = null;
 addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (S.game) renderIfPlay(); }, 150); });
-addEventListener('popstate', (e) => { const t = e.state && e.state.tab; if (t) setTab(t, 'none'); });
+addEventListener('popstate', onPop);
+// Same game open in a second tab: take whatever the other tab saved last,
+// so the two never play different games under one save.
+function adoptSaved() {
+  if (S.net) return;
+  let d;
+  try { d = JSON.parse(localStorage.getItem(LS) || 'null'); } catch { return; }
+  const sg = d && d.game;
+  if (!sg || !sg.log || !Array.isArray(d.seats)) return;
+  const g = S.game;
+  if (g && sg.seed === g.seed && sg.log.length <= g.log.length) return; // nothing newer
+  S.game = sg; S.seats = d.seats; S.review = d.review || []; S.seenLog = sg.log.length;
+  S.sel = []; S.hint = null; S.sheet = null; S.newIds = new Set(); S.gen++; clearTimeout(timer);
+  closeSheet();
+  if (S.tab === 'play' && S.screen !== 'setup') { render(); step(); }
+}
+addEventListener('storage', (e) => { if (e.key === LS) adoptSaved(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  adoptSaved();
+  if (S.waitVisible) { S.waitVisible = false; step(); }
+});
 try {
   setTab(['play', 'table', 'learn', 'settings'].includes(S.tab) ? S.tab : 'play', 'replace');
   if (S.game && S.game.phase !== 'over') step();

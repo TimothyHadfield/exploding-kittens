@@ -5,10 +5,11 @@ import { newGame, apply, view, waitingOn, comboKind } from './engine.js';
 import { decide, assess, placeWeights } from './ai.js';
 import { beliefFromLog } from './odds.js';
 import { cardSVG, backSVG } from './art.js';
-import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML } from './ui.js';
+import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML, settingsTap } from './ui.js';
 import { renderTable, tableClick, tableInput, tableEvents } from './table.js';
-import './fx.js?v=5';
-import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=5';
+import './fx.js?v=6';
+import './tablekit.js?v=6';
+import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=6';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js';
@@ -303,6 +304,8 @@ function startGame() {
   S.review = []; S.sel = []; S.hint = null; S.sheet = null; S.shown = -1;
   S.seenLog = S.game.log.length;
   S.gen++;
+  // the opening hands are dealt from the pile, one card at a time
+  S.newIds = new Set(S.game.hands.flatMap((h, i) => (isHuman(i) ? h.map((c) => c.id) : [])));
   save();
   step();
   playCues(S.game.log, undefined);
@@ -352,6 +355,12 @@ function act(a, fromBot = false) {
       S.review.push({ seat: a.seat, turn: g.turnNo, pE: A.pDeath, mine: summarize(v, a), best: summarize(v, best), same: sameAction(a, best), hasDef: A.hasDef });
     } catch { /* review is optional */ }
   }
+  // where the played cards sit in the hand now, so they can glide onto the pile
+  S.fromRects = {};
+  for (const id of a.cards || (a.type === 'nope' ? [a.card] : [])) {
+    const e = document.querySelector(`#hand [data-card="${id}"]`);
+    if (e) S.fromRects[id] = e.getBoundingClientRect();
+  }
   if (S.net) {
     const { seat: _seat, ...move } = a;
     S.sel = []; S.hint = null;
@@ -397,6 +406,7 @@ function boom() {
 
 // ------------------------------------------------------------------ sound & effects (js/sfx.js -> js/fx.js)
 const FX = window.FX;
+const T = window.TABLE; // shared table kit (js/tablekit.js)
 function fxClasses() {
   const s = FX.settings;
   document.documentElement.classList.toggle('fx-noanim', !s.animations);
@@ -508,23 +518,40 @@ function renderPlay() {
       ${futureHTML(b)}
     </div>` : '<div></div>';
 
+  // Draw pile: a real stack whose edge gets thinner as cards are drawn.
   const ikPos = v.ikUp;
-  const deck = `<div class="pile deck ${v.deckCount ? '' : 'empty'}"><div class="stack">${backSVG()}
+  const st = T.stackShadow(v.deckCount, { perCard: 0.3, max: 16 });
+  const deck = `<div class="pile deck ${v.deckCount ? '' : 'empty'}"><div class="stack" style="--stk:${st.shadow};--rise:-${st.thickness}px">${v.deckCount ? backSVG() : ''}
       ${ikPos >= 0 ? `<div class="ikup" style="top:${Math.min(96, 4 + ikPos * 3)}%" title="Face-up Imploding Kitten, ${ikPos} cards down"></div>` : ''}</div>
       <div class="lbl">${v.deckCount} left${ikPos >= 0 ? ` · IK at ${ikPos + 1}` : ''}</div>
       ${study && v.deck ? `<div class="lbl" style="font-size:10.5px">${v.deck.slice(0, 5).map((t) => CARD[t.replace('+', '')].short).join(' · ')}</div>` : ''}</div>`;
+  // Discard pile: the last few cards tossed face up, each at its own small angle.
   const top = v.discard[v.discard.length - 1];
-  const discard = `<div class="pile discard ${top ? '' : 'empty'}"><div class="stack" ${top ? `data-cardinfo="${top.t}"` : ''}>${top ? cardSVG(top.t) : `<svg viewBox="0 0 100 140" class="cardsvg"><rect x="2" y="2" width="96" height="136" rx="10" fill="none" stroke="#2a3042" stroke-dasharray="6 5" stroke-width="2"/></svg>`}</div>
+  const showN = Math.min(5, v.discard.length), from0 = v.discard.length - showN;
+  const landTop = top && top.id !== S.lastTop && !(S.fromRects && S.fromRects[top.id]);
+  S.lastTop = top && top.id;
+  const pileCards = v.discard.slice(from0).map((c, k) => {
+    const j = T.jitter('ek-discard', from0 + k, { rot: 11, off: 4 });
+    const isTop = k === showN - 1;
+    return `<div class="pc${isTop ? ' top' : ''}${isTop && landTop ? ' land' : ''}" data-id="${c.id}" style="translate:${j.x}px ${j.y}px;rotate:${j.r}deg">${cardSVG(c.t)}</div>`;
+  }).join('');
+  const discard = `<div class="pile discard ${top ? '' : 'empty'}"><div class="stack" ${top ? `data-cardinfo="${top.t}"` : ''}>${pileCards}</div>
       <div class="lbl">Discard · ${v.discard.length}</div></div>`;
 
-  const opps = g.hands.map((h, s) => s).filter((s) => s !== me).map((s) => {
+  // Seats round the far side: name plate, the backs of their held hand, and
+  // the face-up kitten in front of anyone who exploded.
+  const oppSeats = g.hands.map((h, s) => s).filter((s) => s !== me);
+  const opps = oppSeats.map((s, i) => {
     const turnBadge = g.cur === s && g.turns > 1 ? `<span class="badge">${g.turns}×</span>` : '';
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
-    const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="muted" style="font-weight:500;font-size:11px">away</span>' : '';
+    const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="lvl">away</span>' : '';
     const peek = study && v.hands ?`<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
-    return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}" data-seat="${s}">${turnBadge}
-      <div class="nm">${esc(name(s))}${lvl ? ` <span class="muted" style="font-weight:500;font-size:11px">${lvl}</span>` : ''}${away}</div>
-      <div class="meta">${g.alive[s] ? `<span class="mini"></span>${v.handCounts[s]}${v.defusesUsed[s] ? ` · <span title="Defuses used">D−${v.defusesUsed[s]}</span>` : ''}` : '💥 out'}</div>
+    const n = oppSeats.length, t = n > 1 ? Math.abs((i / (n - 1)) * 2 - 1) : 0;
+    const k = Math.min(7, v.handCounts[s]);
+    const backs = Array.from({ length: k }, (_, b) => `<i style="--i:${b};--r:${k > 1 ? ((b / (k - 1)) * 2 - 1) * 14 : 0}deg"></i>`).join('');
+    return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}" data-seat="${s}" style="--arc:${Math.round(t * t * 30)}px">${turnBadge}
+      <div class="nm">${esc(name(s))}${lvl ? ` <span class="lvl">${lvl}</span>` : ''}${away}</div>
+      <div class="meta">${g.alive[s] ? `<span class="mini" style="--n:${k}">${backs}</span><span class="cnt">${v.handCounts[s]}</span>${v.defusesUsed[s] ? `<span class="du" title="Defuses used">D−${v.defusesUsed[s]}</span>` : ''}` : `<span class="outcard">${cardSVG('EK')}</span><span class="cnt">out</span>`}</div>
       ${peek}<div class="think"><i></i><i></i><i></i></div></div>`;
   }).join('');
 
@@ -538,9 +565,11 @@ function renderPlay() {
 
   const hand = (v.hand || []).slice().sort((a, b) => order(a.t) - order(b.t));
   const hintIds = S.hint && S.hint.cards ? S.hint.cards : [];
-  const ov = handOverlap(hand.length);
-  const tight = ov > 8; // overlapped: draw each card's art inside its visible strip
-  const handHtml = hand.map((c) => `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}">${cardSVG(c.t, { tight })}</button>`).join('');
+  // Your hand, held as an arced fan at the bottom edge.
+  const fan = handFan(hand.length);
+  const tight = fan.L.length > 1 && fan.L[0].step < fan.cw - 8; // overlapped: draw each card's art inside its visible strip
+  const handHtml = hand.length ? `<div class="fanbox" style="width:${fan.W}px">${hand.map((c, i) => { const p = fan.L[i]; return `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}" style="--x:${p.x}px;--y:${(p.y - fan.drop).toFixed(1)}px;--r:${p.r}deg;z-index:${i + 1}">${cardSVG(c.t, { tight })}</button>`; }).join('')}</div>`
+    : !g.alive[me] ? `<div class="fanbox outme">${cardSVG('EK')}</div>` : '';
 
   // play button
   const selTypes = S.sel.map((id) => (hand.find((c) => c.id === id) || {}).t).filter(Boolean);
@@ -558,7 +587,7 @@ function renderPlay() {
   // re-parsing every SVG card on each computer move was slow on phones.
   if (!root.querySelector(':scope > .ingame')) {
     root.innerHTML = `<div class="ingame" style="height:100%">
-      <div class="game">
+      <div class="game tbl-surface tbl-wood-dark">
         <div class="opps" id="p-opps"></div>
         <div class="felt" id="p-felt"></div>
         <div class="status" id="p-status"></div>
@@ -581,8 +610,9 @@ function renderPlay() {
   const handEl = $('#hand');
   handEl.className = 'hand' + (myTurn ? '' : ' notmine');
   root.querySelector('.game').classList.toggle('myturn', myTurn);
-  handEl.style.setProperty('--ov', ov + 'px');
-  patch('hand', handHtml || '<span class="muted" style="margin:auto">No cards</span>');
+  handEl.style.setProperty('--hand-h', fan.H + 'px');
+  const newIds = S.newIds;
+  const handNew = patch('hand', handHtml || '<span class="muted" style="margin:auto">No cards</span>');
   patch('p-acts', `<button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
           <button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>
           <button class="btn primary" data-draw ${myTurn ? '' : 'disabled'}>Draw</button>`);
@@ -590,17 +620,64 @@ function renderPlay() {
   // the log only shows on laptop width; reading scrollHeight forces a full layout, so do it after paint
   if (sideNew && LAPTOP.matches) requestAnimationFrame(() => { const ll = $('#loglist'); if (ll) ll.scrollTop = ll.scrollHeight; });
   S.newIds = new Set();
+  if (handNew && newIds.size) dealIn(newIds);
+  // online: the played cards reach the pile with the next room snapshot
+  if (S.fromRects && (playOnto(S.fromRects) || !S.net)) S.fromRects = null;
   timed('r.prompt', () => renderPrompt(v, b, rows, lastLines));
 }
 
-// Overlap cards just enough to fit the row; past that the row scrolls.
-function handOverlap(n) {
-  if (n < 2) return 0;
+// Fan geometry for n cards (the shared table kit's fanLayout). Card width must
+// match --cw in style.css. H is fixed per screen size, so the hand never
+// changes height as cards come and go.
+function handFan(n) {
   const lap = innerWidth >= 900;
-  const cw = lap ? 112 : innerWidth <= 360 ? 58 : 66;
-  const W = (lap ? Math.min(innerWidth - 200 - 320, 900) : innerWidth) - 28;
-  const need = (n * cw - W) / (n - 1);
-  return Math.round(Math.max(lap ? -6 : 4, Math.min(cw - 44, need)));
+  const cw = lap ? 112 : innerWidth <= 360 ? 58 : 66, ch = cw * 1.4;
+  const side = !lap && innerHeight <= 500 && innerWidth > innerHeight; // phone sideways: hand gets the right column
+  const W = Math.round(lap ? Math.min(innerWidth - 200 - 320, 900) - 32 : side ? (innerWidth * 1.1) / 2.1 - 16 : innerWidth - 16);
+  const maxRot = lap ? 10 : 14;
+  const L = T.fanLayout(n, { width: W, cardW: cw, cardH: ch, spread: lap ? 0.8 : 0.62, maxRot });
+  const drop = L.length ? Math.max(...L.map((p) => p.y)) : 0;
+  const maxDrop = (1 - Math.cos((maxRot * Math.PI) / 180)) * ch * 3;
+  return { L, cw, W, drop, H: Math.ceil(ch + maxDrop + 22) };
+}
+
+const animSpeed = () => (FX.settings.animSpeed === 'fast' ? 0.55 : 1);
+// New cards in your hand: a card back flies off the draw pile, lands in its
+// place in the fan and turns face up.
+function dealIn(ids) {
+  if (!T.animOn()) return;
+  const deckEl = fxEl('deck');
+  let k = 0;
+  for (const id of ids) {
+    const card = document.querySelector(`#hand [data-card="${id}"]`);
+    const face = card && card.querySelector('.cardsvg');
+    if (!card || !face) continue;
+    const wait = k++ * 110 * animSpeed();
+    face.style.opacity = '0';
+    const turnUp = () => {
+      face.style.opacity = '';
+      if (face.animate) face.animate([{ transform: 'perspective(500px) rotateY(-90deg)' }, { transform: 'perspective(500px) rotateY(0deg)' }], { duration: 220 * animSpeed(), easing: 'ease-out' });
+    };
+    setTimeout(() => {
+      if (!deckEl || !deckEl.isConnected || !card.isConnected) { turnUp(); return; }
+      T.deal(deckEl, card, { face: `<div class="flyback">${backSVG()}</div>`, duration: 380 }).then(turnUp, turnUp);
+    }, wait);
+  }
+}
+// Cards you just played glide from your hand onto the discard pile.
+function playOnto(rects) {
+  if (!T.animOn()) return 1;
+  let n = 0;
+  for (const [id, a] of Object.entries(rects)) {
+    const pc = document.querySelector(`#p-felt .discard .pc[data-id="${id}"]`);
+    if (!pc || !pc.animate) continue;
+    const b = pc.getBoundingClientRect();
+    const dx = a.left + a.width / 2 - (b.left + b.width / 2), dy = a.top + a.height / 2 - (b.top + b.height / 2);
+    const s = b.width ? a.width / b.width : 1;
+    pc.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${s.toFixed(3)})` }, { transform: 'none' }], { duration: 380 * animSpeed(), easing: 'cubic-bezier(.3,.7,.3,1)' });
+    n++;
+  }
+  return n;
 }
 
 const ORDER = ['DEF', 'NOPE', 'ATK', 'TATK', 'SKIP', 'REV', 'STF', 'ALTER', 'SHUF', 'BOTTOM', 'FAV', 'FERAL', 'TACO', 'MELON', 'POTATO', 'BEARD', 'RAINBOW'];
@@ -755,8 +832,7 @@ function onClick(e) {
   }
   if (S.tab === 'learn') { if (learnClick(t)) render(); return; }
   if (S.tab === 'settings') {
-    if (t.closest('.fx-set')) return; // Sound & effects handles its own rows
-    if (d.speed) { S.settings.speed = d.speed; save(); render(); }
+    if (settingsTap(d, S.settings)) { save(); render(); }
     return;
   }
   // ---- play tab
@@ -895,6 +971,9 @@ $('#ver').textContent = VERSION;
 document.addEventListener('click', onClick);
 document.addEventListener('input', onInput);
 document.addEventListener('change', onChange);
+// the hand fan is laid out for the screen width: redo it after a rotate / resize
+let resizeT = null;
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (S.game) renderIfPlay(); }, 150); });
 addEventListener('popstate', (e) => { const t = e.state && e.state.tab; if (t) setTab(t, 'none'); });
 try {
   setTab(['play', 'table', 'learn', 'settings'].includes(S.tab) ? S.tab : 'play', 'replace');

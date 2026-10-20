@@ -28,6 +28,12 @@ export function spotLabel(pos, N) {
   if (pos >= N) return 'Bottom';
   return `${ordinal(pos + 1)} from the top`;
 }
+// Settings tab tap (button data-* as `d`): Computer speed. Returns true if it changed something.
+export function settingsTap(d, settings) {
+  if (d && d.speed) { settings.speed = d.speed; return true; }
+  return false;
+}
+
 export const help = (text) => `<button class="q" data-help="${esc(text)}" aria-label="Why?">?</button>`;
 
 export function sheet(html) {

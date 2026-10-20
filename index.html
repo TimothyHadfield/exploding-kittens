@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Exploding Kittens Lab</title>
+<meta name="description" content="Play Exploding Kittens against computers with exact kitten odds, a card tracker, study mode and a real-table odds companion.">
+<meta name="theme-color" content="#0f1117">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1><img src="icon.svg" alt="">Exploding Kittens</h1>
+    <div class="spacer"></div>
+    <span class="ver" id="ver"></span>
+  </header>
+  <main>
+    <section class="view" id="v-play"></section>
+    <section class="view" id="v-table"></section>
+    <section class="view" id="v-learn"></section>
+    <section class="view" id="v-settings"></section>
+  </main>
+  <nav class="tabs" id="tabs" aria-label="Sections">
+    <button data-tab="play"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="11" height="16" rx="2"/><path d="M9 21h9a2 2 0 0 0 2-2V7"/></svg>Play</button>
+    <button data-tab="table"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M16 3l-2 3M12 3v3"/></svg>Table</button>
+    <button data-tab="learn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>Learn</button>
+    <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</button>
+  </nav>
+</div>
+<script type="module" src="js/app.js?v=1"></script>
+</body>
+</html>

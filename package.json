@@ -1,0 +1,9 @@
+{
+  "name": "exploding-kittens",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "sim": "node tools/sim.js"
+  }
+}

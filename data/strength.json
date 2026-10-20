@@ -1,0 +1,28 @@
+{
+ "games": 100,
+ "measured": "2026-10-20",
+ "heads": {
+  "hard-easy": {
+   "hard": 99,
+   "easy": 1
+  },
+  "hard-medium": {
+   "hard": 80,
+   "medium": 20
+  },
+  "medium-easy": {
+   "medium": 94,
+   "easy": 6
+  }
+ },
+ "table": {
+  "four": {
+   "hard": 46,
+   "medium": 24,
+   "easy": 6
+  },
+  "allHard4": {
+   "hard": 25
+  }
+ }
+}

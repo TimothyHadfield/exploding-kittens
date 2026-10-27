@@ -81,15 +81,23 @@ export function cardSVG(t, opts = {}) {
   const bg = dark ? '#24242a' : '#fbf7ef';
   const band = BAND[t] || c.color;
   const iconAt = opts.tight ? 'translate(-4,44) scale(.8)' : 'translate(4,38) scale(.92)';
-  const fs = c.short.length > (opts.tight ? 6 : 7) ? 12 : 14;
+  const fs = c.short.length > 7 ? 15 : 16; // = nameUnits in guards.js
+  // opts.edge {fu, bx}: a tightly overlapped card in a held fan. Only a thin
+  // left strip shows, so the name runs down that strip and a small icon sits
+  // in the top corner (instead of a name cut to "Def").
+  const e = opts.edge;
+  const art = e
+    ? `<g transform="translate(${(e.bx + 0.36 * e.fu - 13).toFixed(1)},4.5) scale(.26)">${ICON[t] || ''}</g>
+    <text transform="translate(${e.bx},42) rotate(90)" font-size="${e.fu}" font-weight="800" fill="${t === 'EK' || t === 'IK' || t === 'NOPE' ? '#fff' : '#17130f'}" font-family="system-ui,sans-serif">${c.short}</text>`
+    : `<g transform="${iconAt}">${t === 'EK' ? BURST : ''}${ICON[t] || ''}</g>
+    <text x="8" y="24" font-size="${fs}" font-weight="800" fill="${dark ? '#fff' : '#1b1712'}" font-family="system-ui,sans-serif">${c.short}</text>`;
   return `<svg viewBox="0 0 100 140" class="cardsvg" role="img" aria-label="${c.name}">${SHINE}
     <rect x="1" y="1" width="98" height="138" rx="10" fill="${bg}" stroke="#00000033"/>
     <rect x="1" y="35" width="98" height="104" rx="10" fill="${band}"/>
     <rect x="1" y="35" width="98" height="11" fill="${band}"/>
     <rect x="1" y="35" width="98" height="104" rx="10" fill="url(#ekShine)"/>
     <rect x="1" y="34" width="98" height="1.5" fill="#000" opacity=".18"/>
-    <g transform="${iconAt}">${t === 'EK' ? BURST : ''}${ICON[t] || ''}</g>
-    <text x="8" y="24" font-size="${fs}" font-weight="800" fill="${dark ? '#fff' : '#1b1712'}" font-family="system-ui,sans-serif">${c.short}</text>
+    ${art}
     <rect x="4" y="4" width="92" height="132" rx="7.5" fill="none" stroke="#fff" stroke-opacity="${dark ? '.14' : '.4'}" stroke-width="1"/>
     ${up}</svg>`;
 }

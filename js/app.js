@@ -4,16 +4,16 @@ import { CARD, EDITIONS, boxFor } from './cards.js';
 import { newGame, apply, view, waitingOn, comboKind } from './engine.js';
 import { decide, assess, placeWeights } from './ai.js';
 import { beliefFromLog } from './odds.js';
-import { cardSVG, backSVG } from './art.js?v=7';
+import { cardSVG, backSVG } from './art.js?v=8';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML, settingsTap } from './ui.js';
 import { renderTable, tableClick, tableInput, tableEvents } from './table.js';
-import './fx.js?v=7';
-import './tablekit.js?v=7';
-import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=7';
+import './fx.js?v=8';
+import './tablekit.js?v=8';
+import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=8';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js';
-import { seenAfterReload, fanWidth, crowded, keepSel } from './guards.js?v=7';
+import { seenAfterReload, handGeom, nameMode, crowded, keepSel } from './guards.js?v=8';
 
 export const VERSION = 'v1.0';
 const LS = 'ek:v1';
@@ -552,16 +552,21 @@ function renderPlay() {
       ${study && v.deck ? `<div class="lbl" style="font-size:10.5px">${v.deck.slice(0, 5).map((t) => CARD[t.replace('+', '')].short).join(' · ')}</div>` : ''}</div>`;
   // Discard pile: the last few cards tossed face up, each at its own small angle.
   const top = v.discard[v.discard.length - 1];
-  const showN = Math.min(5, v.discard.length), from0 = v.discard.length - showN;
+  // A Nope chain in progress: each Nope lands a little lower than the one
+  // before, so the card being Noped and every Nope on it can be counted.
+  const chainK = g.phase === 'nope' && v.pending ? Math.min(3, v.pending.nopes || 0) : 0;
+  const showN = Math.min(Math.max(5, chainK + 1), v.discard.length), from0 = v.discard.length - showN;
   const landTop = top && top.id !== S.lastTop && !(S.fromRects && S.fromRects[top.id]);
   S.lastTop = top && top.id;
   const pileCards = v.discard.slice(from0).map((c, k) => {
     const j = T.jitter('ek-discard', from0 + k, { rot: 11, off: 4 });
     const isTop = k === showN - 1;
-    return `<div class="pc${isTop ? ' top' : ''}${isTop && landTop ? ' land' : ''}" data-id="${c.id}" style="translate:${j.x}px ${j.y}px;rotate:${j.r}deg">${cardSVG(c.t)}</div>`;
+    const cj = chainK ? chainK - (showN - 1 - k) : 0; // 1..chainK for the Nopes in the chain
+    const pos = cj > 0 ? ` chain" style="--j:${cj};rotate:${cj % 2 ? 3 : -3}deg` : `" style="translate:${j.x}px ${j.y}px;rotate:${j.r}deg`;
+    return `<div class="pc${isTop ? ' top' : ''}${isTop && landTop ? ' land' : ''}${pos}" data-id="${c.id}">${cardSVG(c.t)}</div>`;
   }).join('');
-  const discard = `<div class="pile discard ${top ? '' : 'empty'}"><div class="stack" ${top ? `data-cardinfo="${top.t}"` : ''}>${pileCards}</div>
-      <div class="lbl">Discard · ${v.discard.length}</div></div>`;
+  const discard = `<div class="pile discard ${top ? '' : 'empty'}${chainK ? ' chain' : ''}" style="--k:${chainK}"><div class="stack" ${top ? `data-cardinfo="${top.t}"` : ''}>${pileCards}</div>
+      <div class="lbl">${chainK ? `<b>${v.pending.nopes} Nope${v.pending.nopes > 1 ? 's' : ''}</b>` : `Discard · ${v.discard.length}`}</div></div>`;
 
   // Seats round the far side: name plate, the backs of their held hand, and
   // the face-up kitten in front of anyone who exploded.
@@ -596,7 +601,10 @@ function renderPlay() {
   // Your hand, held as an arced fan at the bottom edge.
   const fan = handFan(hand.length);
   const tight = fan.L.length > 1 && fan.L[0].step < fan.cw - 8; // overlapped: draw each card's art inside its visible strip
-  const handHtml = hand.length ? `<div class="fanbox" style="width:${fan.W}px">${hand.map((c, i) => { const p = fan.L[i]; return `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}" style="--x:${p.x}px;--y:${(p.y - fan.drop).toFixed(1)}px;--r:${p.r}deg;z-index:${i + 1}">${cardSVG(c.t, { tight })}</button>`; }).join('')}</div>`
+  // too tight for names across the top: they run down each card's visible strip
+  const nm = nameMode(fan.L, fan.cw, fan.ch, hand.map((c) => CARD[c.t].short));
+  const edge = nm.mode === 'edge' ? nm : null;
+  const handHtml = hand.length ? `<div class="fanbox" style="width:${fan.W}px">${hand.map((c, i) => { const p = fan.L[i]; return `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}" style="--x:${p.x}px;--y:${(p.y - fan.drop).toFixed(1)}px;--r:${p.r}deg;z-index:${i + 1}">${cardSVG(c.t, edge && i < hand.length - 1 ? { edge } : { tight })}</button>`; }).join('')}</div>`
     : !g.alive[me] ? `<div class="fanbox outme">${cardSVG('EK')}</div>` : '';
 
   // play button
@@ -663,18 +671,7 @@ function renderPlay() {
 // match --cw in style.css. H is fixed per screen size, so the hand never
 // changes height as cards come and go.
 function handFan(n) {
-  const lap = innerWidth >= 900;
-  const cw = lap ? 112 : innerWidth <= 360 ? 58 : 66, ch = cw * 1.4;
-  const side = !lap && innerHeight <= 500 && innerWidth > innerHeight; // phone sideways: hand gets the right column
-  const W0 = Math.round(lap ? Math.min(innerWidth - 200 - 320, 900) - 32 : side ? (innerWidth * 1.1) / 2.1 - 16 : innerWidth - 16);
-  const maxRot = lap ? 10 : 14;
-  // a huge hand (Party Pack, lots of steals) never squeezes a card below a
-  // finger's width: the fan gets wider than the screen and slides sideways
-  const { W, scrolls } = fanWidth({ n, cw, ch, width: W0, maxRot, minStep: lap ? 16 : 18 });
-  const L = T.fanLayout(n, { width: W, cardW: cw, cardH: ch, spread: lap ? 0.8 : 0.62, maxRot });
-  const drop = L.length ? Math.max(...L.map((p) => p.y)) : 0;
-  const maxDrop = (1 - Math.cos((maxRot * Math.PI) / 180)) * ch * 3;
-  return { L, cw, W, drop, scrolls, H: Math.ceil(ch + maxDrop + 22) };
+  return handGeom(innerWidth, innerHeight, n, T.fanLayout);
 }
 
 const animSpeed = () => (FX.settings.animSpeed === 'fast' ? 0.55 : 1);
@@ -773,7 +770,7 @@ function renderPromptInner(v, b, rows, lines) {
   if (S.sheet && S.sheet.type === 'saw') {
     const nSaw = S.sheet.cards.length;
     sheet(`<h3>${nSaw === 1 ? 'The last card in the pile' : `The top ${nSaw} cards`}</h3><p>${nSaw === 1 ? 'It is the next card drawn.' : 'Left is the next card drawn.'}</p>
-      <div class="cards-pick">${S.sheet.cards.map((t) => `<button tabindex="-1">${cardSVG(t.replace('+', ''), { up: t.endsWith('+') })}</button>`).join('')}</div>
+      <div class="cards-pick big">${S.sheet.cards.map((t) => `<button tabindex="-1">${cardSVG(t.replace('+', ''), { up: t.endsWith('+') })}</button>`).join('')}</div>
       <div class="btns"><button class="btn primary" data-close>Got it</button></div>`);
     return;
   }
@@ -807,7 +804,7 @@ function renderPromptInner(v, b, rows, lines) {
     if (!S.alter || S.alter.n !== g.log.length) S.alter = { n: g.log.length, order: p.top.map((c) => c.id), pick: null };
     const byId = Object.fromEntries(p.top.map((c) => [c.id, c]));
     sheet(`<h3>Alter the Future</h3><p>${p.top.length > 1 ? 'Tap two cards to swap them. Left is drawn first.' : 'Only one card is left, so there is nothing to swap.'}</p>
-      <div class="cards-pick">${S.alter.order.map((id) => `<button data-swap="${id}" class="${S.alter.pick === id ? 'on' : ''}">${cardSVG(byId[id].t.replace('+', ''), { up: byId[id].t.endsWith('+') })}</button>`).join('')}</div>
+      <div class="cards-pick big">${S.alter.order.map((id) => `<button data-swap="${id}" class="${S.alter.pick === id ? 'on' : ''}">${cardSVG(byId[id].t.replace('+', ''), { up: byId[id].t.endsWith('+') })}</button>`).join('')}</div>
       <div class="btns"><button class="btn primary" data-alterdone>Done</button></div>`);
     return;
   }

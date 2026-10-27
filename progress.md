@@ -2,7 +2,7 @@
 
 ## START HERE
 Read order: this file → `CLAUDE.md` → `docs/rules-check.md` → `docs/ideas.md` → `chat.md`.
-Last updated: 2026-10-20 (edge pass: weird-scenario fixes + outside look review).
+Last updated: 2026-10-27 (visibility pass: bigger hand names, felt-filling piles, countable Nope chains).
 
 ## Goal right now
 Tim (via the manager): "Also add ... Exploading kittens to the list" — a study site with the deck exactly right, variants, play vs computers / online, exact kitten odds, card tracker, hint, study mode, real-table companion, own data ideas. First version and the QA fix round are done and live; next is whatever Tim says after he tries it.
@@ -21,6 +21,7 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 | Sounds, celebrations, animations (2026-10-20) | Done: shared `js/fx.js` (verbatim copy of `_fx/fx.js`) + game map `js/sfx.js`; "Sound & effects" panel in Settings; 7 tests in `tests/fx.test.js` |
 | Real-table look (2026-10-20) | Done: Play screen on a dark-wood table (shared `_table` kit), draw pile as a stack that thins as it's drawn, messy face-up discard (last 5, seeded tilt), your hand as an arced fan, seats with name plates + fanned card backs + face-up kitten when out (arc round the far side on laptop), new cards fly off the pile and turn face up, your played cards glide onto the pile; phone-sideways layout (piles left, hand right). Real-game notes: scratchpad `table/exploding-kittens/real.md` |
 | QA by a fresh agent | Run 2026-10-19; every item fixed 2026-10-20 (see chat.md) |
+| Visibility pass (2026-10-27) | Done: hand cards bigger (phone 66→76 px, SE 58→68) so names print ≥ 10.9 px; tight hands write names down each card's strip (`nameMode` in guards.js, `cardSVG(t,{edge})`); piles + dial size to the felt's height (container query, laptop 150→176–198 px piles); laptop fan uses the column (no 900 px cap); crowded seats' counts 12 px (13 on laptop); See the Future / Alter sheet cards 70→106–120 px; a Nope chain stacks down the discard so each Nope is countable ("2 Nopes" label). Harness + shots: scratchpad `vis/exploding-kittens/` (`vis.mjs`, `taps.mjs`, `before3/` vs `after/`); `tests/visibility.test.js` |
 | Edge pass (2026-10-20) | Done: ~60 weird scenarios, 23 engine probes + 300 bot games all pass, 52 browser checks; 14 real failures fixed (table below) |
 
 ## Edge pass scenarios (2026-10-20)
@@ -48,6 +49,7 @@ Passed already: reloads (mid-turn, defuse slider, game over), storage blocked, S
 - "add opptional sounds you can add to the games that reflect what's happening in the game accurately as well as win celebrations, and other fun annimations to go along with everything. Just make sure everything is customizable in the settings so the user can play as preffered." (2026-10-20)
 - "could you also make sure that each of the games also have a look to them so that the game (either board or card layout) looks almost identical to how the board or card layout looks like in real life, so it's easy to understand if you've already played it before, and also so it feels more like you're actually playing in real life rather than you're playing it online. Even things like how youre cards or other things are laid out infront of you, make it look like they are actual cards laid out similar to how it looks like in real life. Make the decks look like actual decks. Make the board have the same design as it does in real life with the same layouts. It should look kind of like you're looking through a camera that is connected to a user's glasses that is playing in real life (not actually, but the layout and style of everything should be similar)." (2026-10-20)
 - "I've noticed the games often have good user interfaces but could be improved especially when a scenario happens that the game might've not really thought about or whatnot. Could you focus on making each game perfect especially in scenarios that the game doesn't expect or are a little weird." (2026-10-20)
+- "for a lot of the games the cards or board layout is too small to easily see what's going on. Some games just need small design imporvements like filling the screen with the board view and fitting the cards and other things in the empty space, some have severe errors like TTR. Fix this so the view of what's happening and where everything is is very clear. Consider parts of the board that are dense in what's happening and if the user can reasonably see it." (2026-10-21)
 - Global: never ask permission; $0; background-only testing; Tim owns looks/wording/names.
 
 ## Event → sound map (`js/sfx.js`; others' moves at 0.75 volume)
@@ -89,7 +91,9 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Game moves redraw only the Play tab (`renderIfPlay`); redrawing Table/Learn resets what the person is reading.
 - Table: two-event taps share a group `g` so Undo removes both; any change that makes `tableBelief` conflict or `bad` is reverted, never silently dropped.
 - `window.EK.perf.on = true` turns on per-step timings (scratchpad `lag3.js` reads them).
-- Bump `?v=N` on `css/table.css`, `css/style.css` and `js/app.js` in `index.html` when shipping CSS/JS changes (now `v=7`). `js/art.js` and `js/guards.js` are imported with `?v=7` from app.js. `js/ui.js` is imported **unversioned** by table.js and learn.js: never add a new export to ui.js that another file needs, or a stale cached ui.js breaks the import on Pages.
+- Bump `?v=N` on `css/table.css`, `css/style.css` and `js/app.js` in `index.html` when shipping CSS/JS changes (now `v=8`). `js/art.js` and `js/guards.js` are imported with `?v=8` from app.js.
+- Hand card width lives in `handCardW()` (guards.js) AND `--cw` in style.css (76 phone / 68 at ≤360 / 112 laptop): change both. `handFan()` now just calls `handGeom()`.
+- Felt piles/dial are sized by a size container on `.felt` (`--pw`, `--ring`, `--proom`, `--droom`); set those vars per breakpoint, not `.pile{width}` directly. `js/ui.js` is imported **unversioned** by table.js and learn.js: never add a new export to ui.js that another file needs, or a stale cached ui.js breaks the import on Pages.
 - `js/guards.js` holds the pure edge rules (`seenAfterReload`, `fanWidth`, `crowded`, `keepSel`), tested in `tests/edge.test.js`. `crowded()` is width-based on laptop too (play column, 100 px per seat).
 - Menu screen (`S.screen==='setup'`) pauses the computers (`step()` returns early); `resumeGame()` restarts them. A hidden tab sets `S.waitVisible` and resumes on `visibilitychange`. A second tab adopts a newer saved game (`adoptSaved`).
 - Sheet tap guard: `renderPrompt` wraps `renderPromptInner` and stamps when a new sheet appears; `onClick` ignores taps inside `#sheet` for 320 ms after that.
@@ -101,7 +105,7 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Hand fan: `handFan()` in app.js (kit's `fanLayout`); card width must match `--cw` in style.css; hand height is fixed per screen size so nothing jumps. Phone sideways (height ≤ 500) uses a two-column grid; `handFan` uses the right column's width. A resize re-renders Play.
 - Played-card glide: `act()` records hand rects in `S.fromRects`; `playOnto()` animates the pile card from there (online: waits for the snapshot). Others' cards get the `land` drop only when the top card changes (`S.lastTop`).
 - `html.fx-noanim` (Animations off) kills every CSS animation/transition; `html.fx-fast` shortens deal/land/sheet/boom. Set by `fxClasses()` in app.js.
-- `fx.js`, `tablekit.js` and `sfx.js` are imported with `?v=7`; bump with app.js.
+- `fx.js`, `tablekit.js` and `sfx.js` are imported with `?v=8`; bump with app.js.
 
 ## Decisions
 - Spare Defuses: 2 back in (1 with 5 players), per the 2025 publisher sheet; Party Pack: all.
@@ -125,6 +129,7 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Online stall after a host reload (QA saw it once in ~9 runs; not reproduced).
 - Online with 3+ real people or across a host drop-out (the shared module's tests cover takeover; not run with this game).
 - Party Pack 10-player online free-tier cost.
+- Visibility pass: still small by choice: 16+ card hands keep 18 px strips and slide sideways (edge-pass decision; taps measured 0 wrong); 320 px dial shrank 100→85–90 px because the bigger hand took its height; floating "Defused!"/"NOPE!" text briefly covers the dial/discard (shared fx.js, not edited). Tap check: the first tap round right after a deal sometimes misses in headless (same on main, element under the finger is the right card).
 
 ## Rejected / parked
 (none yet)

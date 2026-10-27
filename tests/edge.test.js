@@ -10,8 +10,8 @@ import { newGame, apply, waitingOn } from '../js/engine.js';
 globalThis.window = globalThis;
 await import('../js/tablekit.js');
 const T = globalThis.TABLE;
-const PHONE = { cw: 66, ch: 66 * 1.4, maxRot: 14, minStep: 18 };
-const SE = { cw: 58, ch: 58 * 1.4, maxRot: 14, minStep: 18 };
+const PHONE = { cw: 76, ch: 76 * 1.4, maxRot: 14, minStep: 18 };
+const SE = { cw: 68, ch: 68 * 1.4, maxRot: 14, minStep: 18 };
 const LAP = { cw: 112, ch: 112 * 1.4, maxRot: 10, minStep: 16 };
 function minStrip(n, dev, width) {
   const { W } = fanWidth({ n, width, ...dev });

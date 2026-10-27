@@ -329,5 +329,5 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
   .dial .pct small { font-size: 9.5px; }
   .dial .cap { font-size: 11px; }
   .future { margin-top: 2px; min-height: 22px; }
-  .future span { width: 26px; height: 24px; font-size: 11px; }
+  .future span { width: 28px; height: 24px; font-size: 12px; }
 }

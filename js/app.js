@@ -12,7 +12,7 @@ import './tablekit.js?v=8';
 import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=8';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
-import { createOnline } from './online.js';
+import { createOnline } from './online.js?v=a3d0418b';
 import { seenAfterReload, handGeom, nameMode, crowded, keepSel } from './guards.js?v=8';
 
 export const VERSION = 'v1.0';

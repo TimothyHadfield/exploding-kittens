@@ -81,6 +81,7 @@ Passed already: reloads (mid-turn, defuse slider, game over), storage blocked, S
 Online: sounds come from the snapshot log diff, so every player hears every move; each sees their own win/lose.
 
 ## Traps
+- **online.js cache stamp (2026-10-27):** every import of `js/online.js` uses `?v=a3d0418b`, the `_online` content stamp. After a re-copy: put the new stamp from `node ../_online/tools/stamp.mjs` there, bump the importing file's `?v=` (and pwa.js `data-version`), then `node ../_online/tools/stamp.mjs --check .` must say OK.
 - `js/online.js` is a verbatim copy of the shared module. Don't edit it here.
 - Online `publicView` masks hands, pile, out piles and **the rng** (the rng would let a player predict shuffles). `tests/online.test.js` guards this; keep it passing.
 - Online play disables Study mode (it would show other hands).

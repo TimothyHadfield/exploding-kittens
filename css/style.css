@@ -413,8 +413,7 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
 .rp-nav { display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 6px; align-items: center; margin-top: 12px; }
 .rp-nav input { width: 100%; accent-color: var(--warm); }
 .rp-nav .btn { min-width: 40px; min-height: 40px; }
-/* shared coach kit: its rules tabs scroll sideways on a phone; wrap them (same fix as King of Tokyo) */
-.coach-rules .coach-rules-nav { flex-wrap: wrap; overflow-x: visible; row-gap: 6px; }
+/* rules sheet tables: keep the card name on one line (the tabs wrap in game-coach 1.1.0 itself) */
 .coach-rules td:first-child { white-space: nowrap; vertical-align: top; padding-right: 8px; }
 /* the "New to Exploding Kittens?" card sits above the tab bar and the Deal button */
 :root { --coach-offer-bottom: 144px; }

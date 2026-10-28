@@ -1,0 +1,10 @@
+{
+  "repo": "exploding-kittens",
+  "ready": "!!(window.EK && document.querySelector('#v-play .more-row, #v-play #p-felt'))",
+  "play": [
+    "(async () => { const w = ms => new Promise(r => setTimeout(r, ms)); if (window.COACH) COACH.closeOffer(); EK.S.settings.speed = 'fast'; EK.S.setup.players = 2; EK.S.setup.edition = 'original'; EK.S.setup.seats = [{ type: 'me', name: 'You' }, { type: 'bot', level: 'medium', name: 'Ada' }]; EK.S.screen = null; EK.startGame(); for (let i = 0; i < 100; i++) { if (EK.S.game && EK.S.game.phase === 'turn' && EK.S.game.cur === 0 && document.querySelector('#p-acts [data-draw]')) break; await w(100); } window.__n = EK.S.game.log.length; document.querySelector('#p-acts [data-draw]').click(); })()"
+  ],
+  "played": "(() => { const b = document.querySelector('#sheet [data-insert]'); if (b) b.click(); const g = EK.S.game; return !!g && g.phase !== 'over' && g.log.slice(window.__n).some(e => e.seat === 1); })()",
+  "safe": "document.querySelector('nav.tabs [data-tab=\"settings\"]').click()",
+  "debug": "JSON.stringify((() => { const g = EK.S.game; return g ? { phase: g.phase, cur: g.cur, n: g.log.length, before: window.__n, sheet: (document.querySelector('#sheet h3') || {}).textContent } : null; })())"
+}

@@ -13,9 +13,9 @@ import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js?v=a3d0418b';
-import { seenAfterReload, handGeom, nameMode, crowded, keepSel } from './guards.js?v=8';
+import { seenAfterReload, handGeom, nameMode, crowded, keepSel } from './guards.js?v=12';
 import * as EKP from './ekprofile.js?v=10';
-import * as EKC from './ekcoach.js?v=10';
+import * as EKC from './ekcoach.js?v=12';
 import { faceSVG, momentSVG } from './faces.js?v=10';
 import { replaySteps, replayHTML } from './replay.js?v=10';
 
@@ -698,7 +698,12 @@ function renderPlay() {
   const oppSeats = g.hands.map((h, s) => s).filter((s) => s !== me);
   // more seats than fit at their normal size: shrink them so none is off screen
   const oppsEl = $('#p-opps');
-  const crowd = crowded(oppSeats.length, LAPTOP.matches ? (oppsEl && oppsEl.clientWidth) || innerWidth - 520 : innerWidth, LAPTOP.matches);
+  // phone sideways: the seats sit over the piles so the hand gets the whole
+  // right column, unless the table is too big for half the width (then they
+  // keep the full width and the hand sizes to what is left under them)
+  const sideways = !LAPTOP.matches && innerHeight <= 500 && innerWidth > innerHeight;
+  S.oppsWide = sideways && crowded(oppSeats.length, innerWidth / 2.1, false);
+  const crowd = crowded(oppSeats.length, LAPTOP.matches ? (oppsEl && oppsEl.clientWidth) || innerWidth - 520 : sideways && !S.oppsWide ? innerWidth / 2.1 : innerWidth, LAPTOP.matches);
   const opps = oppSeats.map((s, i) => {
     const turnBadge = g.cur === s && g.turns > 1 ? `<span class="badge">${g.turns}×</span>` : '';
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
@@ -777,7 +782,9 @@ function renderPlay() {
   const handEl = $('#hand');
   handEl.className = 'hand' + (myTurn ? '' : ' notmine') + (fan.scrolls ? ' scrolls' : '');
   root.querySelector('.game').classList.toggle('myturn', myTurn);
+  root.querySelector('.game').classList.toggle('opps-wide', !!S.oppsWide);
   handEl.style.setProperty('--hand-h', fan.H + 'px');
+  handEl.style.setProperty('--cw', fan.cw + 'px'); // handCardW is the one source (phone sideways sizes to the height)
   const newIds = S.newIds;
   const handNew = patch('hand', handHtml || '<span class="muted" style="margin:auto">No cards</span>');
   const undoBtn = !S.net && S.mode !== 'daily' && humans().length === 1 ? `<button class="btn undo" data-undo aria-label="Undo your last move" title="Undo" ${canUndo() ? '' : 'disabled'}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>` : '';
@@ -799,7 +806,7 @@ function renderPlay() {
 // match --cw in style.css. H is fixed per screen size, so the hand never
 // changes height as cards come and go.
 function handFan(n) {
-  return handGeom(innerWidth, innerHeight, n, T.fanLayout);
+  return handGeom(innerWidth, innerHeight, n, T.fanLayout, S.oppsWide ? 75 : 0);
 }
 
 const animSpeed = () => (FX.settings.animSpeed === 'fast' ? 0.55 : 1);

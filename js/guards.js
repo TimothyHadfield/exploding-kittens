@@ -29,16 +29,20 @@ export const crowded = (nOpps, width, laptop) => nOpps > Math.max(1, Math.floor(
 
 // Hand card width (px) for a screen; must match --cw in style.css. Big enough
 // that a card's name prints at 10 px or more on every phone.
-export function handCardW(w, h) {
+export function handCardW(w, h, above = 0) {
   if (w >= 900) return 112;
-  if (h <= 500 && w > h) return 76; // phone sideways
+  // phone sideways: the hand owns the right column from the header down to its
+  // buttons (h - 46 header - 59 tabs - 64 buttons), so the cards grow to fill
+  // it; H = ch * (1 + 3(1 - cos 14deg)) + 22 (handGeom). above = px the
+  // seats take over the column when a big table needs the full width for them
+  if (h <= 500 && w > h) return Math.max(68, Math.min(120, Math.floor((h - 46 - 59 - 64 - 23 - above) / 1.0891 / 1.4)));
   return w <= 360 ? 68 : 76;
 }
 // The held fan for n cards on a w×h screen (fanLayout = the table kit's).
 // H is fixed per screen size, so the hand never changes height.
-export function handGeom(w, h, n, fanLayout) {
+export function handGeom(w, h, n, fanLayout, above = 0) {
   const lap = w >= 900;
-  const cw = handCardW(w, h), ch = cw * 1.4;
+  const cw = handCardW(w, h, above), ch = cw * 1.4;
   const side = !lap && h <= 500 && w > h; // phone sideways: hand gets the right column
   const W0 = Math.round(lap ? Math.min(w - 200 - 320, 1200) - 32 : side ? (w * 1.1) / 2.1 - 16 : w - 16);
   const maxRot = lap ? 10 : 14;

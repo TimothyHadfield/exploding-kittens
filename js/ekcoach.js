@@ -38,6 +38,16 @@ export function steps(ctx) {
   ];
 }
 
+// Learn videos on YouTube. Each id checked with YouTube's oembed (200 + this
+// title) on 2026-10-28.
+export const VIDEOS = [
+  { id: 'kAkRKuv5Rts', title: 'How to play Exploding Kittens', who: 'Matthew Inman (the game’s creator)', what: 'how to play, 3 min' },
+  { id: '4osKpgjvdYo', title: 'A Sample Round of Exploding Kittens', who: 'Exploding Kittens', what: 'a real round, played through' },
+  { id: 'kV_vAisKd1A', title: 'How to CRUSH Your Friends CONSISTENTLY at Exploding Kittens!', who: 'PD Reviews', what: 'strategy' },
+  { id: 'txHH2TvIXn8', title: 'how to play Exploding Kittens - Imploding Kittens', who: 'The Game Reporter', what: 'the Imploding expansion' },
+  { id: 'Em80PxR9tnU', title: 'how to play Exploding Kittens - Streaking Kittens', who: 'The Game Reporter', what: 'the Streaking expansion' },
+];
+
 export const RULES = {
   title: 'How to play Exploding Kittens',
   sections: [
@@ -48,5 +58,6 @@ export const RULES = {
     { id: 'combos', short: 'Combos', title: 'Combos', html: '<ul><li><b>Two of a kind</b>: steal a random card from a player.</li><li><b>Three of a kind</b>: name a card; if that player has it, they must give it to you.</li><li><b>Five different cards</b>: take any card from the discard pile (a Settings switch).</li></ul>' },
     { id: 'attack', short: 'Attacks', title: 'Attacks', html: '<p>An attacked player takes 2 turns, drawing each time. If they Attack back, the next player takes their remaining turns plus 2 (the current official rule). Settings has the house rule where it is always just 2.</p>' },
     { id: 'options', short: 'Options', title: 'Decks and options', html: '<ul><li><b>Imploding Kittens</b>: adds 20 cards, including Reverse, Targeted Attack, Draw from the Bottom, Alter the Future, Feral Cat and the Imploding Kitten (first draw: put it back face up; second draw: you are out, no Defuse).</li><li><b>Party Pack</b>: 2 to 10 players.</li><li><b>Faster game</b>: removes about a third of the pile unseen.</li></ul>' },
+    { id: 'videos', short: 'Videos', title: 'Videos', html: VIDEOS.map((x) => `<p><a href="https://www.youtube.com/watch?v=${x.id}" target="_blank" rel="noopener"><b>${x.title}</b></a><br><small class="vid-by">${x.who} · ${x.what}</small></p>`).join('') },
   ],
 };

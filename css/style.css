@@ -316,8 +316,10 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
 @media (max-height: 700px) and (max-width: 899px) { .felt { padding: 2px 10px; } }
 /* phone turned sideways: the piles on the left, your hand on the right (handFan in app.js matches) */
 @media (max-height: 500px) and (max-width: 899px) and (orientation: landscape) {
+  /* the seats sit over the piles, so the hand gets the whole right column (wave 3) */
   .game { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); grid-template-rows: auto minmax(0, 1fr) auto auto;
-    grid-template-areas: "opps opps" "felt hw" "status hw" "hint hw"; }
+    grid-template-areas: "opps hw" "felt hw" "status hw" "hint hw"; }
+  .game.opps-wide { grid-template-areas: "opps opps" "felt hw" "status hw" "hint hw"; } /* big table: seats need the full width */
   .game > .opps { grid-area: opps; padding-top: 4px; }
   .game > .felt { grid-area: felt; padding: 0 6px; gap: 4px; }
   .game > .status { grid-area: status; height: 52px; }
@@ -417,3 +419,7 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
 .coach-rules td:first-child { white-space: nowrap; vertical-align: top; padding-right: 8px; }
 /* the "New to Exploding Kittens?" card sits above the tab bar and the Deal button */
 :root { --coach-offer-bottom: 144px; }
+
+/* wave 3: the rules sheet's Videos links read on the paper sheet */
+.coach-rules-body a { color: #1d4f8f; }
+.coach-rules-body .vid-by { color: #6b5d4f; }

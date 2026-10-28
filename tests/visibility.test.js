@@ -36,6 +36,18 @@ test('in a hand of 1 to 25 cards every name can be read in full', () => {
   }
 });
 
+// Phone sideways (wave 3): the hand has the whole right column under the
+// header (46 px) and above the tab bar (59 px), less the buttons (64 px). The
+// fan should fill it, not leave a strip of empty felt above the cards.
+test('phone sideways: the hand fills its column, with no empty strip above', () => {
+  for (const [w, h] of [[659, 393], [844, 390], [568, 320], [740, 360]]) {
+    const room = h - 46 - 59 - 64;
+    const g = handGeom(w, h, 8, T.fanLayout);
+    assert.ok(g.H <= room, `${w}x${h}: hand ${g.H} px taller than its ${room} px`);
+    assert.ok(room - g.H <= 24, `${w}x${h}: ${room - g.H} px of empty felt above the hand`);
+  }
+});
+
 test('a normal 8-card hand on a phone and the laptop keeps the full fan on screen', () => {
   for (const [w, h] of SIZES) assert.equal(handGeom(w, h, 8, T.fanLayout).scrolls, false, `${w}x${h}`);
   // the laptop fan uses the play column, not a 900 px cap

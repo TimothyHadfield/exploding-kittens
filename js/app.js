@@ -1070,7 +1070,7 @@ function setupCoach() {
 function offerTutorial() {
   const C = window.COACH;
   if (!C || !tour || S.game || S.net || S.tab !== 'play' || C.offered(EKC.ID)) return;
-  C.offer({ id: EKC.ID, title: 'New to Exploding Kittens?', text: 'Play one guided game against two Easy computers.', yes: 'Teach me', no: 'No thanks', onYes: () => { S.screen = null; startGame('tutorial'); } });
+  C.offer({ id: EKC.ID, title: 'New to Exploding Kittens?', text: 'Play one guided game against two Easy computers.', yes: 'Teach me', no: 'No thanks', onYes: () => { S.screen = null; startGame('tutorial'); }, place: 'auto', avoid: ['.dealbar'] });
 }
 
 // ------------------------------------------------------------------ settings

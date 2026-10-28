@@ -420,9 +420,6 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
 .rp-nav .btn { min-width: 40px; min-height: 40px; }
 /* rules sheet tables: keep the card name on one line (the tabs wrap in game-coach 1.1.0 itself) */
 .coach-rules td:first-child { white-space: nowrap; vertical-align: top; padding-right: 8px; }
-/* the "New to Exploding Kittens?" card sits above the tab bar and the Deal button */
-:root { --coach-offer-bottom: 144px; }
-
-/* wave 3: the rules sheet's Videos links read on the paper sheet */
-.coach-rules-body a { color: #1d4f8f; }
+/* the "New to Exploding Kittens?" card: placed by game-coach 1.2.0 (place 'auto', avoids .dealbar);
+   rules-sheet links: the kit's ink-blue */
 .coach-rules-body .vid-by { color: #6b5d4f; }

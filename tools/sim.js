@@ -2,17 +2,19 @@
 // Usage: node tools/sim.js [games]   -> writes data/strength.json + data/stats.json
 import { writeFileSync } from 'node:fs';
 import { newGame, apply, view, waitingOn } from '../js/engine.js';
-import { decide, makeRng } from '../js/ai.js';
+import { decide, makeRng, placeWeights, habitOpts } from '../js/ai.js';
 import { beliefFromLog } from '../js/odds.js';
 
 export function playGame(cfg, levels, seed, hooks = {}) {
   let st = newGame(cfg, seed);
   const r = makeRng(seed ^ 0x5bd1e995);
   let steps = 0;
+  // every computer knows the others' hiding habits (as a player learns them at a real table)
+  const opts = { key: levels.map((l) => l[0]).join(''), place: (s, N, left) => placeWeights(levels[s], N, left) };
   while (st.phase !== 'over') {
     const seat = waitingOn(st)[0];
     const v = view(st, seat);
-    const a = decide(v, levels[seat], r);
+    const a = decide(v, levels[seat], r, habitOpts(v, opts));
     if (hooks.before) hooks.before(st, a);
     st = apply(st, a, { inPlace: true });
     if (++steps > 4000) throw new Error('runaway game seed ' + seed);

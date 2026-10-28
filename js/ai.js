@@ -90,7 +90,8 @@ function decideTurn(v, level, r, opts = {}) {
   }
 
   // Danger: chance this draw ends the game for me (or costs my Defuse).
-  const threshold = hasDef ? (level === 'hard' ? 0.5 : 0.4) : (level === 'hard' ? 0.12 : 0.25);
+  // Hard's numbers tuned by self-play 2026-10-27 (were 0.5 / 0.12)
+  const threshold = hasDef ? (level === 'hard' ? 0.35 : 0.4) : (level === 'hard' ? 0.25 : 0.25);
   const topKnown = A.top[0];
   const danger = topKnown === 'E' ? (hasDef ? 0.9 : 1) : topKnown === 'U' ? 1 : topKnown === 'S' ? 0 : A.pDeath;
   const dodge = () => {
@@ -208,9 +209,25 @@ function placeKitten(v, level, r) {
   // After my defuse my turn ends; v.turns counts this turn still.
   const mineLeft = Math.max(0, v.turns - 1);
   if (level === 'medium') return Math.min(N, mineLeft + Math.floor(r() * 3));
-  // hard: right where the next player draws it, unless that's me again
-  const pos = mineLeft;
-  return Math.min(N, pos);
+  // hard: usually right where the next player draws it, but not always, so a
+  // player who knows the habit can't be sure the top card is the kitten
+  return pickWeighted(placeWeights('hard', N, mineLeft), r);
+}
+
+// A computer reads the others' hiding habits (opts.place) only at a table of
+// 3+; heads-up it made Hard dodge too often (self-play 2026-10-27: H vs M
+// 1v1 74% -> 63% with it, while 3+ players gained).
+export const habitOpts = (v, opts) => (v.alive.filter(Boolean).length >= 3 ? opts || {} : {});
+
+// Hard's mix: next player's draw most of the time, one or two cards deeper
+// sometimes, now and then anywhere in the top half.
+export const HARD_HIDE = { top: 0.55, second: 0.15, third: 0.1, spread: 0.2 };
+
+function pickWeighted(w, r) {
+  const sum = w.reduce((a, x) => a + x, 0);
+  let x = r() * sum;
+  for (let i = 0; i < w.length; i++) { x -= w[i]; if (x < 0) return i; }
+  return w.length - 1;
 }
 
 // The same habit as weights over the N+1 spots, so a player who knows which
@@ -218,8 +235,14 @@ function placeKitten(v, level, r) {
 export function placeWeights(level, N, left) {
   if (level !== 'medium' && level !== 'hard') return null;
   const w = Array(N + 1).fill(0);
-  if (level === 'hard') w[Math.min(N, left)] = 1;
-  else for (let j = 0; j < 3; j++) w[Math.min(N, left + j)] += 1;
+  if (level === 'hard') {
+    const H = HARD_HIDE;
+    w[Math.min(N, left)] += H.top;
+    w[Math.min(N, left + 1)] += H.second;
+    w[Math.min(N, left + 2)] += H.third;
+    const half = Math.max(0, Math.ceil(N / 2));
+    for (let j = 0; j <= half; j++) w[j] += H.spread / (half + 1);
+  } else for (let j = 0; j < 3; j++) w[Math.min(N, left + j)] += 1;
   return w;
 }
 

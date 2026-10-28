@@ -2,7 +2,7 @@
 
 ## START HERE
 Read order: this file → `CLAUDE.md` → `docs/rules-check.md` → `docs/ideas.md` → `chat.md`.
-Last updated: 2026-10-27 (improvement pass: My stats + Daily, guided first game + rules, Undo, replay, cat faces, boom/defuse moment, home-screen app, Hard hides less predictably).
+Last updated: 2026-10-28 (wave 3: Rules sheet Videos tab, phone-sideways layout fix, optional Streaking pack with all three computer levels, odds and online; live at 923d3f2).
 
 ## Goal right now
 Tim (via the manager): "Also add ... Exploading kittens to the list" — a study site with the deck exactly right, variants, play vs computers / online, exact kitten odds, card tracker, hint, study mode, real-table companion, own data ideas. First version and the QA fix round are done and live; next is whatever Tim says after he tries it.
@@ -23,6 +23,7 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 | QA by a fresh agent | Run 2026-10-19; every item fixed 2026-10-20 (see chat.md) |
 | Visibility pass (2026-10-27) | Done: hand cards bigger (phone 66→76 px, SE 58→68) so names print ≥ 10.9 px; tight hands write names down each card's strip (`nameMode` in guards.js, `cardSVG(t,{edge})`); piles + dial size to the felt's height (container query, laptop 150→176–198 px piles); laptop fan uses the column (no 900 px cap); crowded seats' counts 12 px (13 on laptop); See the Future / Alter sheet cards 70→106–120 px; a Nope chain stacks down the discard so each Nope is countable ("2 Nopes" label). Harness + shots: scratchpad `vis/exploding-kittens/` (`vis.mjs`, `taps.mjs`, `before3/` vs `after/`); `tests/visibility.test.js` |
 | Improvement pass (2026-10-27) | Done: Hard hides a defused kitten with a mixed habit (`HARD_HIDE`, was always on top); My stats / achievements / Daily (`_profile` kit + `js/ekprofile.js`); guided first game + rules sheet (`_coach` kit + `js/ekcoach.js`, rules tabs wrap via game CSS); Undo vs computers (not in Daily); end-of-game Replay (`js/replay.js`, rebuilt from seed + moves); computer cat faces with moods (`js/faces.js`); big boom / defuse moment overlay; home-screen app (`_pwa` 1.2.0, `tests/pwa-check.json`, 18/18); fx.js re-copied. UI walk `tests/improve-ui.mjs` at 393, 320, 659×393, 1280 |
+| Wave 3 (2026-10-28) | Done, live 923d3f2: Rules sheet **Videos** tab (5 checked YouTube links); phone sideways (659×393) seats sit over the piles and the hand fills the right column (no empty strip); **Streaking pack** (Rules switch, off by default, not with Party Pack): 15 cards = Streaking Kitten, Super Skip, See the Future 5x, Alter the Future 5x, Swap Top and Bottom, Garbage Collection, Catomic Bomb, Mark, Curse of the Cat Butt; ek = players − 1 (− Imploding). Engine + `tests/streak.test.js` (17, incl. 80-game conservation fuzz and dial calibration < 0.03), odds brute-force tests (+4), AI tests (+4), online masking test. Streak ladder 1000 games: Hard–Easy 98.2/1.8, Hard–Medium 76/24, Medium–Easy 85.5/14.5, 4-player H 42.2 / M 26.9 / E 4.1. Base ladder unchanged (2000 games). npm test 91/91 |
 | Edge pass (2026-10-20) | Done: ~60 weird scenarios, 23 engine probes + 300 bot games all pass, 52 browser checks; 14 real failures fixed (table below) |
 
 ## Edge pass scenarios (2026-10-20)
@@ -114,6 +115,10 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - `habitOpts`: the computers model each other's hiding habit only at 3+ alive players (heads-up it cost Hard 11 points). Hard's hide mix is `HARD_HIDE` in ai.js; `placeWeights('hard')` must match it (tested).
 - Replay heading carries `data-key="replay"` so stepping isn't treated as a new sheet by the 320 ms tap guard.
 - Hand cards are fanned: a headless click on a card's centre lands on the next card. Tests dispatch the click event instead.
+- **Never name an engine event field `n`**: `push()` sets `ev.n` = log index. A Garbage event with `n` once made `beliefFromLog` run `scrambleTop(103)` and run out of memory (2026-10-28). Streak events use `size` / `kittens`.
+- Cache stamps are now `?v=13` for style.css, app.js, pwa `data-version`, and ai/art/sfx/ekcoach imports (guards.js still v12). Bump together.
+- Streaking pack odds: each belief world carries `e` (kittens in the pile) and `h` (bitmask of seats secretly holding a kitten); the Streaking Kitten location is tracked approximately, so the dial shows "≈" counts in streak games. Table tab does not support the pack.
+- Blind (Cursed) hand: `ownHand` returns `BACK` ids `-1-i` except Marked cards; netgame `privateView` masks a blind hand the same way.
 
 ## Decisions
 - Spare Defuses: 2 back in (1 with 5 players), per the 2025 publisher sheet; Party Pack: all.
@@ -126,6 +131,7 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Each tab switch is a browser history step (Back returns to the last tab).
 - Table surface: dark wood (a kitchen table; EK has no board). Odds dial sits on a dark disc so it reads on wood. Card backs stay our own dark-red design.
 - Daily = you + 3 Medium on the Original deck; level ratings Easy 1200 / Medium 1440 / Hard 1560 from the ladder; achievements and their names, cat faces, moment look and Undo icon placement are Claude's plainest picks (2026-10-27), Tim's to change.
+- Streaking pack rulings (Claude's, 2026-10-28, Tim's to change): blind players can't Nope and play only one random card at a time (no combos); an Imploding Kitten's face-down draw doesn't lift the Curse; three-of-a-kind can't name an Exploding Kitten; Catomic Bomb ends one turn; Garbage Collection doesn't end the turn. Looks: Marked cards get a yellow border, a "blind" yellow tag by the seat name, original icons for the 9 new cards. House rules beyond attack stacking: none added (no reliable common one found).
 - Huge hands scroll sideways rather than squeeze cards below 18 px (16 px laptop); 6+ seats on a phone (9+ players at 1280 on laptop) shrink instead of scrolling (2026-10-20, Claude's call; plainest option).
 
 ## NOT verified
@@ -140,7 +146,8 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Party Pack 10-player online free-tier cost.
 - Visibility pass: still small by choice: 16+ card hands keep 18 px strips and slide sideways (edge-pass decision; taps measured 0 wrong); 320 px dial shrank 100→85–90 px because the bigger hand took its height; floating "Defused!"/"NOPE!" text briefly covers the dial/discard (shared fx.js, not edited). Tap check: the first tap round right after a deal sometimes misses in headless (same on main, element under the finger is the right card).
 
-- Improvement pass: faces, moments and the guided game seen only in headless WebKit/Chromium screenshots; online games not in My stats (online was off limits); landscape 659×393 keeps the empty felt above the hand (pre-existing layout, not changed).
+- Improvement pass: faces, moments and the guided game seen only in headless WebKit/Chromium screenshots; online games not in My stats (online was off limits).
+- Streaking pack: seen only in headless WebKit/Chromium (393, 320, 659×393, 568×320, 1280, 1440); online streak play covered by a node test, not two browsers; dial odds are an estimate in streak games; Table tab has no streak support.
 
 ## Rejected / parked
 - ~~Online turn timer~~ parked: online flows were off limits in the 2026-10-27 pass.

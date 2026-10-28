@@ -141,6 +141,9 @@ async function run([label, engine, w, h, mobile]) {
     await shot('setup');
     await page.click('[data-daily]'); await wait(500);
     check(await page.evaluate(() => EK.S.mode === 'daily' && EK.S.game.seed === (window.Profile.daily.seed() | 0) && !document.querySelector('#p-acts [data-undo]')), `${label}: Daily = today's seed, no Undo`);
+    // dealing the Daily again carries on the same game; once it's played it can't be dealt again
+    check(await page.evaluate(() => { const n = EK.S.game.log.length, g = EK.S.game; EK.startGame('daily'); return EK.S.game === g && EK.S.game.log.length >= n; }), `${label}: Daily again = the same game carries on`);
+    check(await page.evaluate(() => { EK.S.recorded = false; EK.S.mine = 1; EK.startGame(); const st = window.Profile.stats().games; const g = EK.S.game; EK.startGame('daily'); return EK.S.mode !== 'daily' && EK.S.game === g && st === 2; }), `${label}: a left Daily counts once and can't be dealt again`);
 
     // ---- big moments
     await page.evaluate(() => { EK.FXDOM.moment({ kind: 'boom', mine: true }); });

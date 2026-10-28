@@ -57,7 +57,7 @@ function load() {
     }
     if (d.game && d.game.log && d.game.hands && Array.isArray(d.seats)) {
       S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = seenAfterReload(d.game.log);
-      const m = d.meta || {};
+      const m = d.meta || { recorded: true }; // a save from before My stats: that game never counts
       S.mode = ['daily', 'tutorial'].includes(m.mode) ? m.mode : null;
       S.helped = !!m.helped; S.recorded = !!m.recorded; S.mine = +m.mine || 0;
       S.moves = Array.isArray(m.moves) ? m.moves : [];
@@ -284,7 +284,7 @@ function onNet(snap) {
     }
     return;
   }
-  if (!S.net) { S.localBak = { game: S.game, seats: S.seats, review: S.review, meta: localMeta(), undo: S.undo }; S.game = null; S.review = []; S.gen++; clearTimeout(timer); }
+  if (!S.net) { S.localBak = { game: S.game, seats: S.seats, review: S.review, meta: localMeta(), undo: S.undo }; S.game = null; S.review = []; restoreMeta(null, []); S.gen++; clearTimeout(timer); }
   S.net = snap;
   S.screen = null;
   let cues = null;
@@ -351,12 +351,14 @@ async function joinRoom() {
 // kind: undefined (the setup screen's game) | 'daily' | 'tutorial'
 function startGame(kind) {
   const su = S.setup;
-  recordGame(); // a game left after your first move counts as a loss
   let cfg, seats, seed;
   if (kind === 'daily') {
     cfg = EKP.dailyCfg();
     seats = [{ type: 'me', name: myName() === 'Player' ? 'You' : myName() }, ...EKP.DAILY.names.map((n) => ({ type: 'bot', level: EKP.DAILY.level, name: n }))];
     seed = P().daily.seed() | 0;
+    // one Daily a day: an unfinished one carries on, a played one can't be dealt again
+    if (S.game && !S.net && S.mode === 'daily' && S.game.seed === seed && S.game.phase !== 'over') { resumeGame(); return; }
+    if (dailyDone()) { toast("Today's Daily is done. A new one comes tomorrow."); return; }
   } else if (kind === 'tutorial') {
     cfg = { ...EKC.CFG };
     seats = [{ type: 'me', name: 'You' }, ...EKC.NAMES.map((n) => ({ type: 'bot', level: 'easy', name: n }))];
@@ -366,7 +368,10 @@ function startGame(kind) {
     cfg = { edition: su.edition, players: su.players, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth };
     seats = su.seats.map((x) => ({ ...x }));
   }
-  try { S.game = newGame(cfg, seed); } catch (e) { toast(e.message); return; }
+  let ng;
+  try { ng = newGame(cfg, seed); } catch (e) { toast(e.message); return; }
+  recordGame(); // a game left after your first move counts as a loss
+  S.game = ng;
   S.seats = seats;
   S.mode = kind || null; S.helped = !!S.settings.study && kind !== 'tutorial'; S.recorded = false; S.undo = []; S.moves = []; S.mine = 0; S.react = {};
   if (kind === 'tutorial' && tour) { tour.reset(); setTimeout(() => tour.start(), 300); }
@@ -1230,6 +1235,7 @@ function adoptSaved() {
   const g = S.game;
   if (g && sg.seed === g.seed && sg.log.length <= g.log.length) return; // nothing newer
   S.game = sg; S.seats = d.seats; S.review = d.review || []; S.seenLog = sg.log.length;
+  restoreMeta(d.meta || { recorded: true }, (Array.isArray(d.undo) ? d.undo : []).filter((u) => u && u.game && u.game.log)); // that tab's notes, not ours
   S.sel = []; S.hint = null; S.sheet = null; S.newIds = new Set(); S.gen++; clearTimeout(timer);
   closeSheet();
   if (S.tab === 'play' && S.screen !== 'setup') { render(); step(); }

@@ -17,7 +17,12 @@ Our own data / theory ideas. **Build** = in the site now. **Skip** = not built, 
 | 11 | **Does seat order matter?** win rate by turn order | Build | Learn tab (answer: barely, 24–26%) |
 | 12 | **Best opening cards**: win rate when a card was dealt to you | Build | Learn tab (an extra Defuse is worth +13 points) |
 | 13 | **Measured computer strength** (Easy / Medium / Hard) | Build | Learn tab, `tools/sim.js` |
-| 14 | Hard computer hides a defused kitten exactly where the next player draws it | Build | `js/ai.js` |
+| 14 | Hard computer hides a defused kitten where the next player draws it, mixed so a repeat player can't learn the spot (2026-10-27: 55% right on top, 25% the next two spots, 20% spread through the upper half; the odds dial knows this habit at 3+ players) | Build | `js/ai.js` `HARD_HIDE`, `tests/ai.test.js` |
+| 20 | My stats, achievements and the Daily game (shared profile kit); games with Hint, Undo or Study mode are unrated | Build | `js/ekprofile.js`, `tests/profile.test.js` |
+| 21 | Guided first game + rules sheet (shared coach kit) | Build | `js/ekcoach.js` |
+| 22 | Undo vs computers and an end-of-game replay | Build | `js/replay.js`, game-over sheet |
+| 23 | Computer cat faces that react, and a big boom / defuse moment | Build | `js/faces.js`, `js/sfx.js` cues |
+| 24 | Online turn timer | Skip | Online flows were off limits in the 2026-10-27 pass |
 | 15 | Rule switches for disputed rules (attack stacking, five-card combo, faster game, 2-player Imploding) | Build | Settings, sourced in `docs/rules-check.md` |
 | 16 | Opponent profiling: learn where *you* tend to hide kittens and weight the odds | Skip | Needs many games from one person; the uniform assumption is the honest default |
 | 17 | Other expansions (Streaking, Barking, Zombie) | Skip | Many new card rules; Imploding + Party Pack cover the asked variants |

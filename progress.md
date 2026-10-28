@@ -2,7 +2,7 @@
 
 ## START HERE
 Read order: this file → `CLAUDE.md` → `docs/rules-check.md` → `docs/ideas.md` → `chat.md`.
-Last updated: 2026-10-27 (visibility pass: bigger hand names, felt-filling piles, countable Nope chains).
+Last updated: 2026-10-27 (improvement pass: My stats + Daily, guided first game + rules, Undo, replay, cat faces, boom/defuse moment, home-screen app, Hard hides less predictably).
 
 ## Goal right now
 Tim (via the manager): "Also add ... Exploading kittens to the list" — a study site with the deck exactly right, variants, play vs computers / online, exact kitten odds, card tracker, hint, study mode, real-table companion, own data ideas. First version and the QA fix round are done and live; next is whatever Tim says after he tries it.
@@ -12,7 +12,7 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 |---|---|
 | Rules engine: Original 56 cards, Imploding (+20), Party Pack (122, paw/no-paw by player count), combos 2/3/5, Nope chains, attack stacking | Done, 20 engine tests incl. a 3000 random-game card-count check |
 | Exact odds (`js/odds.js`): weighted "worlds", brute-force-checked, cached per seat, models each computer's hiding habit | Done, 8 odds tests. Calibrated on 300 games each (2026-10-20): 4 Hard, predicted 14.2% → actual 14.7%; 4 Medium, 14.5% → 15.4% |
-| Computers Easy / Medium / Hard | Done. 2,000 games each (`tools/sim.js`, 2026-10-19): Hard beats Medium 78.1%, Easy 99.3% heads-up; Medium beats Easy 91.6%; 4-player table Hard 44.5% / Medium 24.9% / Easy 5.8% (fair 25%). Measured before Medium/Easy switched to the light belief (cap 300 worlds); not re-run |
+| Computers Easy / Medium / Hard | Done. 2,000 games each (`tools/sim.js`, 2026-10-27, after the hiding change): Hard beats Medium 74.1%, Easy 99% heads-up; Medium beats Easy 91.6%; Hard vs 3 Medium 39.3% (fair 25%, ≈ 66% head-to-head); Medium vs 3 Easy 56.6%; 4-player table Hard 41% / Medium 27.4% / Easy 4.2%; Party 6 Hard vs 5 Medium 27.1% (fair 16.7%). Scratch ladder: `improve/exploding-kittens/ladder.mjs` |
 | Play tab: dial, next-3, tracker, Nope risk, hint, review vs Hard (per person in pass-the-phone), study mode | Done |
 | Online rooms (shared `_online` module) | Done; two headless browsers played a full game on the real Firebase project, secrecy checked |
 | Table tab (real-table companion) | Done; QA fixes covered by `tests/table.test.js` (6 tests) |
@@ -22,6 +22,7 @@ Tim (via the manager): "Also add ... Exploading kittens to the list" — a study
 | Real-table look (2026-10-20) | Done: Play screen on a dark-wood table (shared `_table` kit), draw pile as a stack that thins as it's drawn, messy face-up discard (last 5, seeded tilt), your hand as an arced fan, seats with name plates + fanned card backs + face-up kitten when out (arc round the far side on laptop), new cards fly off the pile and turn face up, your played cards glide onto the pile; phone-sideways layout (piles left, hand right). Real-game notes: scratchpad `table/exploding-kittens/real.md` |
 | QA by a fresh agent | Run 2026-10-19; every item fixed 2026-10-20 (see chat.md) |
 | Visibility pass (2026-10-27) | Done: hand cards bigger (phone 66→76 px, SE 58→68) so names print ≥ 10.9 px; tight hands write names down each card's strip (`nameMode` in guards.js, `cardSVG(t,{edge})`); piles + dial size to the felt's height (container query, laptop 150→176–198 px piles); laptop fan uses the column (no 900 px cap); crowded seats' counts 12 px (13 on laptop); See the Future / Alter sheet cards 70→106–120 px; a Nope chain stacks down the discard so each Nope is countable ("2 Nopes" label). Harness + shots: scratchpad `vis/exploding-kittens/` (`vis.mjs`, `taps.mjs`, `before3/` vs `after/`); `tests/visibility.test.js` |
+| Improvement pass (2026-10-27) | Done: Hard hides a defused kitten with a mixed habit (`HARD_HIDE`, was always on top); My stats / achievements / Daily (`_profile` kit + `js/ekprofile.js`); guided first game + rules sheet (`_coach` kit + `js/ekcoach.js`, rules tabs wrap via game CSS); Undo vs computers (not in Daily); end-of-game Replay (`js/replay.js`, rebuilt from seed + moves); computer cat faces with moods (`js/faces.js`); big boom / defuse moment overlay; home-screen app (`_pwa` 1.2.0, `tests/pwa-check.json`, 18/18); fx.js re-copied. UI walk `tests/improve-ui.mjs` at 393, 320, 659×393, 1280 |
 | Edge pass (2026-10-20) | Done: ~60 weird scenarios, 23 engine probes + 300 bot games all pass, 52 browser checks; 14 real failures fixed (table below) |
 
 ## Edge pass scenarios (2026-10-20)
@@ -106,7 +107,13 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Hand fan: `handFan()` in app.js (kit's `fanLayout`); card width must match `--cw` in style.css; hand height is fixed per screen size so nothing jumps. Phone sideways (height ≤ 500) uses a two-column grid; `handFan` uses the right column's width. A resize re-renders Play.
 - Played-card glide: `act()` records hand rects in `S.fromRects`; `playOnto()` animates the pile card from there (online: waits for the snapshot). Others' cards get the `land` drop only when the top card changes (`S.lastTop`).
 - `html.fx-noanim` (Animations off) kills every CSS animation/transition; `html.fx-fast` shortens deal/land/sheet/boom. Set by `fxClasses()` in app.js.
-- `fx.js`, `tablekit.js` and `sfx.js` are imported with `?v=8`; bump with app.js.
+- `fx.js`, `tablekit.js` are imported with `?v=8`; `sfx.js`, `ai.js`, `ekprofile.js`, `ekcoach.js`, `faces.js`, `replay.js` with `?v=10`, as are style/coach/profile css, profile/coach/pwa js and app.js in index.html (pwa.js `data-version="10"`). Bump them together.
+- Kit copies (never edit here; `.gitattributes` keeps them byte-identical): `js/profile.js` + `css/profile.css` (`_profile` 1.1.0), `js/coach.js` + `css/coach.css` (`_coach`), `sw.js` + `js/pwa.js` + `tools/pwa-check.mjs` + `tools/make-icons.mjs` (`_pwa` 1.2.0), `js/fx.js`. The coach rules tabs scroll sideways on phones: fixed by `.coach-rules .coach-rules-nav` in style.css.
+- My stats: `recordGame()` in app.js records once per game (`S.recorded`); called by `startGame` too, so leaving after your first move (`S.mine > 0`) is a loss. Hint, Undo, Study mode set `S.helped` (unrated). Guided game (`S.mode==='tutorial'`) and online never count. Daily = seed `Profile.daily.seed()`, you + 3 Medium, computers use a seeded rng (`botRng`), no Undo.
+- Guided game: seed 3414, 3 players vs 2 Easy (`js/ekcoach.js`); the steps depend on that deal (See the Future shows a kitten 2nd). Change the engine's deal and re-find a seed.
+- `habitOpts`: the computers model each other's hiding habit only at 3+ alive players (heads-up it cost Hard 11 points). Hard's hide mix is `HARD_HIDE` in ai.js; `placeWeights('hard')` must match it (tested).
+- Replay heading carries `data-key="replay"` so stepping isn't treated as a new sheet by the 320 ms tap guard.
+- Hand cards are fanned: a headless click on a card's centre lands on the next card. Tests dispatch the click event instead.
 
 ## Decisions
 - Spare Defuses: 2 back in (1 with 5 players), per the 2025 publisher sheet; Party Pack: all.
@@ -118,6 +125,7 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Odds assume a computer hides kittens by its known habit, and a person hides them anywhere at random (dial help text says so).
 - Each tab switch is a browser history step (Back returns to the last tab).
 - Table surface: dark wood (a kitchen table; EK has no board). Odds dial sits on a dark disc so it reads on wood. Card backs stay our own dark-red design.
+- Daily = you + 3 Medium on the Original deck; level ratings Easy 1200 / Medium 1440 / Hard 1560 from the ladder; achievements and their names, cat faces, moment look and Undo icon placement are Claude's plainest picks (2026-10-27), Tim's to change.
 - Huge hands scroll sideways rather than squeeze cards below 18 px (16 px laptop); 6+ seats on a phone (9+ players at 1280 on laptop) shrink instead of scrolling (2026-10-20, Claude's call; plainest option).
 
 ## NOT verified
@@ -132,5 +140,7 @@ Online: sounds come from the snapshot log diff, so every player hears every move
 - Party Pack 10-player online free-tier cost.
 - Visibility pass: still small by choice: 16+ card hands keep 18 px strips and slide sideways (edge-pass decision; taps measured 0 wrong); 320 px dial shrank 100→85–90 px because the bigger hand took its height; floating "Defused!"/"NOPE!" text briefly covers the dial/discard (shared fx.js, not edited). Tap check: the first tap round right after a deal sometimes misses in headless (same on main, element under the finger is the right card).
 
+- Improvement pass: faces, moments and the guided game seen only in headless WebKit/Chromium screenshots; online games not in My stats (online was off limits); landscape 659×393 keeps the empty felt above the hand (pre-existing layout, not changed).
+
 ## Rejected / parked
-(none yet)
+- ~~Online turn timer~~ parked: online flows were off limits in the 2026-10-27 pass.

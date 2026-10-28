@@ -22,6 +22,16 @@ export const CARD = {
   REV:     { name: 'Reverse',          short: 'Reverse', kind: 'action', color: '#3cc0a8', text: 'Reverse play order and end one turn. With 2 players: a Skip.' },
   BOTTOM:  { name: 'Draw from the Bottom', short: 'Bottom', kind: 'action', color: '#c0504a', text: 'End your turn by drawing the bottom card.' },
   ALTER:   { name: 'Alter the Future', short: 'Alter',   kind: 'action', color: '#8f5fd6', text: 'Look at the top 3 and put them back in any order.' },
+  // Streaking pack (the Streaking Kittens expansion, 15 cards)
+  STREAK:  { name: 'Streaking Kitten', short: 'Streak',  kind: 'streak', color: '#f0a5b8', text: 'Keep it secret. While you hold it, you can hold 1 Exploding Kitten safely.' },
+  SSKIP:   { name: 'Super Skip',       short: 'Super',   kind: 'action', color: '#2f86c9', text: 'End your turn without drawing. Attacked? End all your turns.' },
+  STF5:    { name: 'See the Future (5x)', short: 'Future5', kind: 'action', color: '#c94593', text: 'Secretly look at the top 5 cards.' },
+  ALTER5:  { name: 'Alter the Future (5x)', short: 'Alter5', kind: 'action', color: '#7044bd', text: 'Look at the top 5 and put them back in any order.' },
+  SWAP:    { name: 'Swap Top and Bottom', short: 'Swap',  kind: 'action', color: '#5f9ea0', text: 'Swap the top and bottom cards of the pile, unseen.' },
+  GARB:    { name: 'Garbage Collection', short: 'Garbage', kind: 'action', color: '#8c8c6a', text: 'Everyone with cards hides 1 of them in the pile. Then shuffle.' },
+  CATOMIC: { name: 'Catomic Bomb',     short: 'Catomic', kind: 'action', color: '#e6b422', text: 'All kittens in the pile go on top. End your turn, no draw.' },
+  MARK:    { name: 'Mark',             short: 'Mark',    kind: 'action', color: '#d97c4e', text: 'A random card in a player’s hand turns face out for all to see.' },
+  CURSE:   { name: 'Curse of the Cat Butt', short: 'Curse', kind: 'action', color: '#7a6a99', text: 'A player must play blind until they draw safely.' },
 };
 
 export const CAT_TYPES = ['TACO', 'MELON', 'POTATO', 'BEARD', 'RAINBOW'];
@@ -48,10 +58,14 @@ export const PARTY_NOPAW = {
 };
 export const PARTY_KITTENS = 9;
 
+// Streaking pack: the Streaking Kittens expansion (publisher rule sheet, 2022
+// print: 15 cards incl. 1 extra Exploding Kitten). Not for the Party Pack.
+export const STREAKING = { STREAK: 1, EK: 1, SSKIP: 1, STF5: 1, ALTER5: 1, SWAP: 3, GARB: 1, CATOMIC: 1, MARK: 3, CURSE: 2 };
+
 export const EDITIONS = {
-  original:  { label: 'Original', min: 2, max: 5 },
-  imploding: { label: 'Original + Imploding', min: 2, max: 6 },
-  party:     { label: 'Party Pack', min: 2, max: 10 },
+  original:  { label: 'Original', min: 2, max: 5, streak: true },
+  imploding: { label: 'Original + Imploding', min: 2, max: 6, streak: true },
+  party:     { label: 'Party Pack', min: 2, max: 10, streak: false },
 };
 
 export const sumCounts = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -63,9 +77,11 @@ export function addCounts(...objs) {
 }
 
 // Everything that goes in the box for a given setup, before any dealing.
-export function boxFor(edition, players) {
-  if (edition === 'original') return { ...ORIGINAL };
-  if (edition === 'imploding') return addCounts(ORIGINAL, IMPLODING);
+// streak = the Streaking pack is shuffled in (Original / Imploding only).
+export function boxFor(edition, players, streak = false) {
+  const sk = streak && EDITIONS[edition] && EDITIONS[edition].streak ? STREAKING : {};
+  if (edition === 'original') return addCounts(ORIGINAL, sk);
+  if (edition === 'imploding') return addCounts(ORIGINAL, IMPLODING, sk);
   if (edition === 'party') {
     let base;
     if (players <= 3) base = { ...PARTY_PAW };
@@ -80,4 +96,7 @@ export function boxFor(edition, players) {
 export const isCat = (t) => CARD[t] && CARD[t].kind === 'cat';
 export const isKitten = (t) => t === 'EK' || t === 'IK';
 // Cards you can play on your own turn as a single card.
-export const PLAYABLE_SINGLE = new Set(['ATK', 'SKIP', 'FAV', 'SHUF', 'STF', 'TATK', 'REV', 'BOTTOM', 'ALTER']);
+export const PLAYABLE_SINGLE = new Set(['ATK', 'SKIP', 'FAV', 'SHUF', 'STF', 'TATK', 'REV', 'BOTTOM', 'ALTER',
+  'SSKIP', 'STF5', 'ALTER5', 'SWAP', 'GARB', 'CATOMIC', 'MARK', 'CURSE']);
+// Single cards that need a player picked: another player, except Targeted Attack (anyone).
+export const TARGETED = new Set(['FAV', 'TATK', 'MARK', 'CURSE']);

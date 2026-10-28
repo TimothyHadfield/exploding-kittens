@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as cards from '../js/cards.js';
 import { newGame, apply, legalActions, view, waitingOn } from '../js/engine.js';
+import { beliefFromLog } from '../js/odds.js';
 
 const { sumCounts, boxFor } = cards;
 const STREAKING = cards.STREAKING || {}; // (so these tests run, and fail, on the code before the pack)
@@ -131,7 +132,7 @@ test('Catomic Bomb: every kitten goes on top, the count is public, your turn end
   assert.deepEqual(st.deck.slice(0, 2).map((c) => c.t), ['EK', 'EK']);
   assert.equal(count(st.deck.slice(2), 'EK'), 0);
   assert.equal(st.deck.length, n);
-  assert.equal(view(st, 1).log.find((e) => e.t === 'catomic').n, 2);
+  assert.equal(view(st, 1).log.find((e) => e.t === 'catomic').kittens, 2);
   assert.equal(st.cur, 1);
 });
 
@@ -239,4 +240,31 @@ test('random play with the pack: every game ends, no card is ever lost or copied
       assert.equal(st.phase, 'over', `${edition} seed ${seed} never ended`);
     }
   }
+});
+
+test('the kitten dial stays honest with the pack: calibrated, never wrong when sure', () => {
+  // random players hide kittens at random spots, which is what the dial assumes
+  let sum = 0, hits = 0, n = 0;
+  for (let seed = 1; seed <= 50; seed++) {
+    let st = newGame({ players: 2 + (seed % 3), streak: true }, seed * 104729);
+    let r = seed;
+    const rnd = (k) => { r = (r * 1103515245 + 12345) & 0x7fffffff; return r % k; };
+    for (let i = 0; i < 3000 && st.phase !== 'over'; i++) {
+      const seat = waitingOn(st)[0];
+      if (st.phase === 'turn' && st.deck.length) {
+        const b = beliefFromLog(view(st, seat).log, seat);
+        assert.ok(!b.conflict, `seed ${seed}: the dial lost track`);
+        assert.equal(b.N, st.deck.length, `seed ${seed}: pile size`);
+        const pE = b.prob(0, 'E');
+        assert.ok(pE >= -1e-9 && pE <= 1 + 1e-9);
+        if (b.known(0) === 'E') assert.equal(st.deck[0].t, 'EK');
+        if (pE < 1e-12) assert.notEqual(st.deck[0].t, 'EK', `seed ${seed} step ${i}: said no kitten`);
+        sum += pE; hits += st.deck[0].t === 'EK' ? 1 : 0; n++;
+      }
+      const acts = legalActions(st, seat);
+      st = apply(st, acts[rnd(acts.length)]);
+    }
+  }
+  assert.ok(n > 1000);
+  assert.ok(Math.abs(sum / n - hits / n) < 0.03, `predicted ${(sum / n).toFixed(3)} vs actual ${(hits / n).toFixed(3)} over ${n}`);
 });

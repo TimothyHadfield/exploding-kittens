@@ -346,7 +346,7 @@ export function apply(stIn, a, opts = {}) {
       const re = order.map((id) => top.find((c) => c.id === id));
       st.deck.splice(0, top.length, ...re);
       push(st, { t: 'altered', vis: [a.seat], cards: re.map((c) => c.t + (c.up ? '+' : '')) });
-      push(st, { t: 'altdone', seat: a.seat, n: top.length });
+      push(st, { t: 'altdone', seat: a.seat, size: top.length }); // (n is the log index)
       pushIkPos(st);
       backToTurn(st);
       break;
@@ -461,7 +461,7 @@ function finishGarbage(st) {
   st.trashBin = [];
   for (const { c } of bin) st.deck.push(c);
   shuffleIn(st, st.deck);
-  push(st, { t: 'garbage', seats: bin.map((x) => x.seat), n: bin.length });
+  push(st, { t: 'garbage', seats: bin.map((x) => x.seat), size: bin.length });
   pushIkPos(st);
   st.phase = 'turn'; st.pending = null;
   // giving away the Streaking Kitten while holding a kitten sets it off
@@ -534,7 +534,7 @@ function resolve(st, p) {
         const ks = st.deck.filter((c) => c.t === 'EK');
         const rest = shuffleIn(st, st.deck.filter((c) => c.t !== 'EK'));
         st.deck = ks.concat(rest);
-        push(st, { t: 'catomic', seat: me, n: ks.length });
+        push(st, { t: 'catomic', seat: me, kittens: ks.length });
         pushIkPos(st);
         endTurn(st);
         break;

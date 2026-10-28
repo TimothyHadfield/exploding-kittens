@@ -8,6 +8,13 @@
 // the worlds by Bayes' rule, so the numbers are exact under one assumption:
 // when someone else hides a kitten, or alters the future, we don't know where
 // it went, so every spot is equally likely.
+//
+// Streaking pack: a player holding the Streaking Kitten keeps a kitten they
+// draw, in secret, so their draw looks safe. Each world then also carries e
+// (kittens still in the pile) and h (a bit per seat secretly holding one),
+// and a safe-looking draw by such a player splits the world in two. Where
+// the Streaking Kitten is comes from a simple tracker (beliefFromLog), so
+// those numbers are a close estimate rather than exact (.approx).
 
 // Above this many worlds we keep the heaviest ones (a tiny approximation,
 // flagged by .approx). Big Party Pack games need it to stay fast on a phone.
@@ -23,15 +30,30 @@ export class Belief {
 
   clone() {
     const b = new Belief(this.N, this.nE, this.nI, this.lite);
-    b.worlds = this.worlds.map((W) => ({ w: W.w, k: W.k.map((e) => ({ ...e })) }));
+    b.streak = this.streak; b.approx = this.approx;
+    b.worlds = this.worlds.map((W) => ({ ...W, k: W.k.map((e) => ({ ...e })) }));
     return b;
+  }
+
+  // Streaking pack on: worlds carry their own kitten count and held-kitten bits.
+  enableStreak() {
+    this.streak = true;
+    for (const W of this.worlds) { W.e = this.nE; W.h = 0; }
+  }
+  _addE(W, d) { if (this.streak) W.e += d; }
+  _syncE() {
+    if (!this.streak) return;
+    let m = 0;
+    for (const W of this.worlds) m += W.w * W.e;
+    this.nE = Math.round(m * 1e9) / 1e9; // the expected number left in the pile
   }
 
   _pool(W) {
     let e = 0, i = 0;
     for (const { x } of W.k) { if (x === 'E') e++; else if (x === 'I') i++; }
     const Nu = this.N - W.k.length;
-    return { Nu, Eu: this.nE - e, Iu: this.nI - i, Su: Nu - (this.nE - e) - (this.nI - i) };
+    const nE = this.streak ? W.e : this.nE;
+    return { Nu, Eu: nE - e, Iu: this.nI - i, Su: Nu - (nE - e) - (this.nI - i) };
   }
 
   _probUnknown(W, x) {
@@ -47,12 +69,14 @@ export class Belief {
     let tot = 0;
     for (const W of this.worlds) tot += W.w;
     if (tot <= 0) { // inconsistent info (should not happen) -> start fresh
-      this.worlds = [{ w: 1, k: [] }];
+      this.worlds = [this.streak ? { w: 1, k: [], e: Math.max(0, Math.round(this.nE)), h: 0 } : { w: 1, k: [] }];
       this.conflict = true;
+      this._syncE();
       return;
     }
     this.worlds = this.worlds.filter((W) => W.w > 1e-15);
     for (const W of this.worlds) W.w /= tot;
+    this._syncE();
   }
 
   _merge() {
@@ -62,7 +86,7 @@ export class Belief {
       let sorted = true;
       for (let i = 1; i < k.length; i++) if (k[i - 1].p > k[i].p) { sorted = false; break; }
       if (!sorted) k.sort((a, b) => a.p - b.p);
-      let key = '';
+      let key = this.streak ? W.e + '/' + W.h + '/' : '';
       for (let i = 0; i < k.length; i++) key += k[i].p + k[i].x;
       const o = m.get(key);
       if (o) o.w += W.w; else m.set(key, W);
@@ -89,7 +113,7 @@ export class Belief {
       if (from === 'top') for (const q of W.k) q.p--;
     }
     this.N--;
-    if (x === 'E') this.nE--;
+    if (x === 'E') { if (this.streak) for (const W of this.worlds) W.e--; else this.nE--; }
     if (x === 'I') this.nI--;
     this._normalize();
   }
@@ -99,9 +123,10 @@ export class Belief {
     for (const W of this.worlds) {
       for (const q of W.k) if (q.p >= pos) q.p++;
       W.k.push({ p: pos, x });
+      if (x === 'E') this._addE(W, 1);
     }
     this.N++;
-    if (x === 'E') this.nE++;
+    if (x === 'E' && !this.streak) this.nE++;
     this._merge();
   }
 
@@ -135,16 +160,98 @@ export class Belief {
           k.push({ p: q.p >= pos ? q.p + 1 : q.p, x: q.x }); // fresh objects: later steps edit p in place
         }
         if (!put) k.push({ p: pos, x });
-        out.push({ w: W.w * f, k });
+        out.push(this.streak ? { w: W.w * f, k, e: W.e, h: W.h } : { w: W.w * f, k });
       }
     }
+    for (const W of out) if (x === 'E') this._addE(W, 1);
+    // worlds passed through untouched share nothing with the split ones, so this is safe
     this.worlds = out;
     this.N++;
-    if (x === 'E') this.nE++;
+    if (x === 'E' && !this.streak) this.nE++;
     this._merge();
   }
 
-  shuffle() { this.worlds = [{ w: 1, k: [] }]; }
+  shuffle() {
+    if (!this.streak) { this.worlds = [{ w: 1, k: [] }]; return; }
+    for (const W of this.worlds) W.k = [];
+    this._merge();
+  }
+
+  // ---- Streaking pack
+  // Someone else drew a card everyone saw as safe; with probability s they
+  // could have kept a kitten instead (they hold the Streaking Kitten).
+  keptOrSafe(from, seat, s) {
+    const pos = from === 'top' ? 0 : this.N - 1;
+    const bit = 1 << seat;
+    const out = [];
+    for (const W of this.worlds) {
+      const e = W.k.find((q) => q.p === pos);
+      const pS = e ? (e.x === 'S' ? 1 : 0) : this._probUnknown(W, 'S');
+      const pE = e ? (e.x === 'E' ? 1 : 0) : this._probUnknown(W, 'E');
+      const can = W.h & bit ? 0 : s;
+      const rest = W.k.filter((q) => q.p !== pos).map((q) => ({ p: from === 'top' ? q.p - 1 : q.p, x: q.x }));
+      if (pS > 0) out.push({ w: W.w * pS, k: rest, e: W.e, h: W.h });
+      if (pE * can > 0) out.push({ w: W.w * pE * can, k: rest.map((q) => ({ ...q })), e: W.e - 1, h: W.h | bit });
+    }
+    this.worlds = out;
+    this.N--;
+    if (s > 0 && s < 1) this.approx = true;
+    this._merge();
+  }
+
+  // A kitten turned up in this seat's hand (it went off, or was Marked):
+  // only worlds where they had kept one survive. clear: it has left the hand.
+  heldFound(seat, clear = true) {
+    const bit = 1 << seat;
+    for (const W of this.worlds) {
+      if (!(W.h & bit)) W.w = 0;
+      else if (clear) W.h &= ~bit;
+    }
+    this._merge();
+  }
+
+  // The seat is out: whatever they held is out of the game.
+  heldGone(seat) {
+    for (const W of this.worlds) W.h &= ~(1 << seat);
+    this._merge();
+  }
+
+  // Garbage Collection: n cards went in and the pile was shuffled. tr = [{seat,
+  // tau}] for players who may have given a kitten they held (tau = chance their
+  // card was it); extraE = kittens we know went in (our own).
+  garbage(n, tr = [], extraE = 0) {
+    let ws = this.worlds.map((W) => ({ ...W, k: [], e: W.e + extraE }));
+    for (const { seat, tau } of tr) {
+      const bit = 1 << seat;
+      const out = [];
+      for (const W of ws) {
+        if (!(W.h & bit)) { out.push(W); continue; }
+        out.push({ ...W, w: W.w * (1 - tau) });
+        out.push({ ...W, w: W.w * tau, e: W.e + 1, h: W.h & ~bit });
+      }
+      ws = out;
+    }
+    this.worlds = ws;
+    this.N += n;
+    this._merge();
+  }
+
+  // Catomic Bomb: n kittens (public) on top, the rest shuffled.
+  catomic(n) {
+    for (const W of this.worlds) {
+      if (this.streak && W.e !== n) W.w = 0;
+      W.k = Array.from({ length: Math.min(n, this.N) }, (_, p) => ({ p, x: 'E' }));
+    }
+    this._merge();
+  }
+
+  // Swap Top and Bottom.
+  swapEnds() {
+    const L = this.N - 1;
+    if (L < 1) return;
+    for (const W of this.worlds) for (const q of W.k) q.p = q.p === 0 ? L : q.p === L ? 0 : q.p;
+    this._merge();
+  }
 
   // The face-up Imploding Kitten is visible at depth pos (its white edge).
   faceUpAt(pos) {
@@ -186,12 +293,19 @@ export class Belief {
   scrambleTop(n = 3) {
     n = Math.min(n, this.N);
     const perms = permutations([...Array(n).keys()]);
+    // 5 cards = 120 orders per world: keep the work bounded on a phone
+    const room = Math.max(20, Math.floor(this.budget / perms.length));
+    if (this.worlds.length > room) {
+      this.worlds.sort((a, b) => b.w - a.w);
+      this.worlds.length = room;
+      this.approx = true;
+    }
     const out = [];
     for (const W of this.worlds) {
       if (!W.k.some((q) => q.p < n)) { out.push(W); continue; }
       for (const pm of perms) {
         const k = W.k.map((q) => ({ p: q.p < n ? pm[q.p] : q.p, x: q.x }));
-        out.push({ w: W.w / perms.length, k });
+        out.push({ ...W, w: W.w / perms.length, k });
       }
     }
     this.worlds = out;
@@ -231,6 +345,83 @@ function permutations(a) {
   return out;
 }
 
+// Where the Streaking Kitten is, and how many cards each player holds, from
+// the public events and our own private ones. loc[s] = chance seat s holds it
+// (loc[P] = in the pile, loc[P+1] = out of the game).
+function newTracker(setup, me) {
+  const P = setup.players;
+  const t = {
+    P, loc: Array(P + 2).fill(0), hc: Array(P).fill(8), alive: Array(P).fill(true),
+    kept: false, trashers: [], myTrashE: 0, mine: false,
+  };
+  const spread = (wDeck) => {
+    const w = t.loc;
+    w.fill(0);
+    for (let s = 0; s < P; s++) if (s !== me && t.alive[s]) w[s] = t.hc[s];
+    w[P] = wDeck; w[P + 1] = setup.removed || 0;
+  };
+  t.spread = spread;
+  t.norm = () => { const tot = t.loc.reduce((a, b) => a + b, 0); if (tot > 0) t.loc = t.loc.map((x) => x / tot); };
+  t.at = (i) => { t.loc.fill(0); t.loc[i] = 1; };
+  t.move = (from, to, f) => { const m = t.loc[from] * f; t.loc[from] -= m; t.loc[to] += m; };
+  t.safeInDeck = (b) => Math.max(1, b.N - b.nE - b.nI);
+  t.canKeep = (s) => t.loc[s];
+  t.afterDraw = (e, me2, b) => {
+    // another player drew from the pile: it may have been the Streaking Kitten
+    if (e.seat !== me2 && e.res === 'S') { t.move(P, e.seat, 1 / (t.safeInDeck(b) + 1)); }
+    if (e.res === 'S') t.hc[e.seat]++;
+  };
+  spread(setup.deck - setup.ek - setup.ik);
+  t.norm();
+  return t;
+}
+
+function streakEvent(c, e, me) {
+  const t = c.sk, b = c.b, P = t.P;
+  switch (e.t) {
+    case 'hand': if (e.cards.includes('STREAK')) t.at(me); break;
+    case 'kept': t.kept = true; break;
+    case 'got': // our own draw
+      if (e.card === 'STREAK') t.at(me);
+      else if (e.card !== 'EK') { t.loc[P] *= 1 - 1 / (t.safeInDeck(b) + 1); t.norm(); }
+      break;
+    case 'play': t.hc[e.seat] -= e.cards.length; break;
+    case 'nope': case 'defuse': case 'lost': case 'handboom':
+      t.hc[e.seat] = Math.max(0, t.hc[e.seat] - 1);
+      if (e.t === 'lost' && e.card === 'STREAK') t.at(P + 1);
+      break;
+    case 'flip': if (e.card === 'STREAK') t.at(e.seat); break;
+    case 'picked': t.hc[e.seat]++; break;
+    case 'stole': case 'gave': {
+      const n0 = Math.max(1, t.hc[e.from]);
+      t.hc[e.from]--; t.hc[e.to]++;
+      if (e.mk) { if (e.mk === 'STREAK') t.at(e.to); }
+      else if (e.from !== me && e.to !== me) t.move(e.from, e.to, 1 / n0);
+      break;
+    }
+    case 'moved': // a card we gave or got
+      if (e.card === 'STREAK') t.at(e.toSeat);
+      else if (e.toSeat === me && e.from !== me) { t.loc[e.from] *= 1 - 1 / Math.max(1, t.hc[e.from] + 1); t.norm(); }
+      break;
+    case 'named':
+      if (e.ok) { t.hc[e.from]--; t.hc[e.to]++; }
+      if (e.name === 'STREAK') { if (e.ok) t.at(e.to); else { t.loc[e.from] = 0; t.norm(); } }
+      break;
+    case 'mark': if (e.card === 'STREAK') t.at(e.seat); break;
+    case 'explode': t.alive[e.seat] = false; t.hc[e.seat] = 0; t.move(e.seat, P + 1, 1); break;
+    case 'trashed': // our own card for Garbage Collection
+      if (e.card === 'EK') t.myTrashE++;
+      if (e.card === 'STREAK') t.at(P);
+      break;
+    case 'trash': {
+      const n0 = Math.max(1, t.hc[e.seat]);
+      t.hc[e.seat]--;
+      if (e.seat !== me) { t.trashers.push({ seat: e.seat, tau: 1 / n0 }); t.move(e.seat, P, 1 / n0); }
+      break;
+    }
+  }
+}
+
 export const kindOf = (t) => (t === 'EK' ? 'E' : t === 'IK' ? 'I' : t === 'IK+' ? 'U' : 'S');
 
 // Build a seat's belief from the log it can see (view(state, seat).log).
@@ -268,9 +459,20 @@ export function beliefFromLog(log, me, opts = {}) {
     const e = log[i];
     c.h = fp(c.h, e);
     const b = c.b;
+    if (c.sk && e.t !== 'setup') streakEvent(c, e, me);
     switch (e.t) {
-      case 'setup': c.b = new Belief(e.deck, e.ek, e.ik, !!opts.lite); c.pending = false; break;
-      case 'draw': b.draw(e.res, e.from); break;
+      case 'setup':
+        c.b = new Belief(e.deck, e.ek, e.ik, !!opts.lite); c.pending = false;
+        c.sk = e.streak ? newTracker(e, me) : null;
+        if (c.sk) c.b.enableStreak();
+        break;
+      case 'draw':
+        if (!c.sk) b.draw(e.res, e.from);
+        else if (e.seat === me && c.sk.kept) { b.draw('E', e.from); c.sk.kept = false; }
+        else if (e.seat !== me && e.res === 'S') b.keptOrSafe(e.from, e.seat, c.sk.canKeep(e.seat));
+        else b.draw(e.res, e.from);
+        if (c.sk) c.sk.afterDraw(e, me, b);
+        break;
       case 'insert':
         if (e.kind === 'U') b.insertKnown(e.pos, 'U');
         else if (e.seat === me) c.pending = true;
@@ -281,7 +483,19 @@ export function beliefFromLog(log, me, opts = {}) {
       case 'ikpos': b.faceUpAt(e.pos); break;
       case 'saw': b.saw(e.cards.map(kindOf)); break;
       case 'altered': b.setTop(e.cards.map(kindOf)); break;
-      case 'altdone': if (e.seat !== me) b.scrambleTop(3); break;
+      case 'altdone': if (e.seat !== me) b.scrambleTop(e.size || 3); break;
+      case 'swap': b.swapEnds(); break;
+      case 'catomic': b.catomic(e.kittens); break;
+      case 'garbage':
+        if (c.sk) { b.garbage(e.size, c.sk.trashers, c.sk.myTrashE); c.sk.trashers = []; c.sk.myTrashE = 0; }
+        else b.garbage(e.size);
+        break;
+      case 'handboom':
+        // a kitten went off in a hand: it came from `from`'s hand, kept there in secret
+        if (c.sk && e.from !== me) b.heldFound(e.from, true);
+        break;
+      case 'mark': if (e.card === 'EK' && e.seat !== me) b.heldFound(e.seat, false); break;
+      case 'explode': if (c.sk) b.heldGone(e.seat); break;
     }
   }
   c.len = log.length;

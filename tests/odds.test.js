@@ -126,3 +126,77 @@ test('two unknown inserts with known info stay exact and fast', () => {
   const tot = [0, 1, 2, 3, 4, 5].reduce((a, p) => a + b.prob(p, 'S') + b.prob(p, 'E'), 0);
   assert.ok(Math.abs(tot - 6) < 1e-9);
 });
+
+// ---- Streaking pack (wave 3). Brute-force worlds also carry h: a bit per
+// seat that is secretly holding a kitten it drew with the Streaking Kitten.
+const bs = {
+  start(N, E) { return brute.start(N, E).map((x) => ({ ...x, h: 0 })); },
+  norm(ws) { const t = ws.reduce((a, b) => a + b.w, 0); return ws.filter((x) => x.w > 0).map((x) => ({ ...x, w: x.w / t })); },
+  // seat drew a card that looked safe; with chance s it was a kitten they kept
+  keptOrSafe(ws, seat, s) {
+    const bit = 1 << seat, out = [];
+    for (const W of ws) {
+      if (W.seq[0] === 'S') out.push({ w: W.w, seq: W.seq.slice(1), h: W.h });
+      else if (W.seq[0] === 'E' && !(W.h & bit)) out.push({ w: W.w * s, seq: W.seq.slice(1), h: W.h | bit });
+    }
+    return bs.norm(out);
+  },
+  heldFound(ws, seat, clear) { const bit = 1 << seat; return bs.norm(ws.filter((W) => W.h & bit).map((W) => ({ ...W, h: clear ? W.h & ~bit : W.h }))); },
+  map(ws, f) { return ws.map((W) => ({ ...W, seq: f(W.seq) })); },
+  shuffleAll(ws) { const out = []; for (const W of ws) for (const o of allOrders(W.seq)) out.push({ w: W.w * o.w, seq: o.seq, h: W.h }); return out; },
+};
+
+test('Streaking: a safe-looking draw may be a kept kitten; a kitten going off in that hand confirms it', () => {
+  const b = new Belief(7, 2); b.enableStreak(); let ws = bs.start(7, 2);
+  b.keptOrSafe('top', 1, 0.4); ws = bs.keptOrSafe(ws, 1, 0.4); same(b, ws, 'kept or safe');
+  b.keptOrSafe('top', 2, 0.25); ws = bs.keptOrSafe(ws, 2, 0.25); same(b, ws, 'second seat');
+  b.keptOrSafe('top', 1, 0.4); ws = bs.keptOrSafe(ws, 1, 0.4); same(b, ws, 'seat 1 again (keeps at most one)');
+  b.heldFound(1, true); ws = bs.heldFound(ws, 1, true); same(b, ws, 'went off in seat 1 hand');
+  b.insertUnknown('E'); ws = brute.insertUnknown(ws, 'E').map((W) => ({ ...W, h: W.h ?? 0 })); same(b, ws, 'hidden again');
+  b.draw('S'); ws = bs.norm(ws.map((W) => ({ ...W, w: W.seq[0] === 'S' ? W.w : 0, seq: W.seq.slice(1) }))); same(b, ws, 'my safe draw');
+});
+
+test('Streaking: marked kitten, Swap Top and Bottom, See the Future x5, others Alter x5', () => {
+  const b = new Belief(8, 2); b.enableStreak(); let ws = bs.start(8, 2);
+  b.keptOrSafe('top', 1, 0.5); ws = bs.keptOrSafe(ws, 1, 0.5);
+  b.heldFound(1, false); ws = bs.heldFound(ws, 1, false); same(b, ws, 'marked kitten seen');
+  b.saw(['S', 'E']); ws = bs.norm(ws.map((W) => ({ ...W, w: W.seq[0] === 'S' && W.seq[1] === 'E' ? W.w : 0 }))); same(b, ws, 'saw');
+  b.swapEnds(); ws = bs.map(ws, (q) => { const s = q.slice(); [s[0], s[s.length - 1]] = [s[s.length - 1], s[0]]; return s; }); same(b, ws, 'swap');
+  const b5 = new Belief(7, 2); b5.enableStreak(); let w5 = bs.start(7, 2);
+  b5.saw(['E', 'S', 'S', 'S', 'E']); w5 = bs.norm(w5.map((W) => ({ ...W, w: W.seq.slice(0, 5).join('') === 'ESSSE' ? W.w : 0 })));
+  b5.scrambleTop(5);
+  const out = [];
+  for (const W of w5) for (const o of allOrders(W.seq.slice(0, 5))) out.push({ w: W.w * o.w, seq: o.seq.concat(W.seq.slice(5)), h: 0 });
+  same(b5, out, 'alter 5 by someone else');
+});
+
+test('Streaking: Catomic Bomb and Garbage Collection', () => {
+  // seat 1 may hold a kitten; Catomic shows 1 kitten in the pile -> seat 1 has the other
+  const b = new Belief(6, 2); b.enableStreak(); let ws = bs.start(6, 2);
+  b.keptOrSafe('top', 1, 0.5); ws = bs.keptOrSafe(ws, 1, 0.5);
+  b.catomic(1);
+  ws = bs.norm(ws.filter((W) => W.seq.filter((x) => x === 'E').length === 1));
+  const cat = [];
+  for (const W of ws) { const rest = W.seq.filter((x) => x !== 'E'); for (const o of allOrders(rest)) cat.push({ w: W.w * o.w, seq: ['E', ...o.seq], h: W.h }); }
+  same(b, cat, 'catomic');
+  assert.equal(b.known(0), 'E');
+  assert.ok(Math.abs(b.nE - 1) < 1e-9);
+  // Garbage: seat 2 maybe held one (tau = 1/3 it was the card given), 2 cards go in, shuffle
+  const g = new Belief(5, 1); g.enableStreak(); let gw = bs.start(5, 1);
+  g.keptOrSafe('top', 2, 0.6); gw = bs.keptOrSafe(gw, 2, 0.6);
+  g.garbage(2, [{ seat: 2, tau: 1 / 3 }]);
+  const after = [];
+  for (const W of gw) {
+    const opts = W.h & 4 ? [[1 / 3, ['E', 'S'], 0], [2 / 3, ['S', 'S'], W.h]] : [[1, ['S', 'S'], W.h]];
+    for (const [f, add, h] of opts) for (const o of allOrders(W.seq.concat(add))) after.push({ w: W.w * f * o.w, seq: o.seq, h });
+  }
+  same(g, after, 'garbage');
+});
+
+test('without the Streaking pack nothing changes', () => {
+  const b = new Belief(8, 2);
+  b.draw('S'); b.saw(['S', 'E', 'S']); b.insertUnknown('E'); b.shuffle();
+  assert.equal(b.nE, 3);
+  assert.equal(b.worlds.length, 1);
+  assert.ok(Math.abs(b.prob(0, 'E') - 3 / 8) < 1e-12);
+});

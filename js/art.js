@@ -58,6 +58,34 @@ const ICON = {
           <circle cx="41" cy="48" r="6" fill="#fff"/><circle cx="59" cy="50" r="4" fill="#fff"/>
           <path d="M41 48m-4 0a4 4 0 1 0 8 0a2 2 0 1 0-4 0" stroke="#e070c8" stroke-width="1.6" fill="none"/>
           <text x="50" y="70" font-size="14" font-weight="900" fill="#e070c8" text-anchor="middle">?</text>`,
+  // ---- Streaking pack
+  // a bare kitten dashing past, speed lines behind it
+  STREAK: `<path d="M12 44h18M8 54h20M14 64h16" stroke="#5a2232" stroke-width="4" stroke-linecap="round"/>
+           <ellipse cx="58" cy="58" rx="22" ry="15" fill="#fbe3ea" stroke="#5a2232" stroke-width="3"/>
+           <circle cx="76" cy="42" r="12" fill="#fbe3ea" stroke="#5a2232" stroke-width="3"/><path d="M68 33l2-9 6 6M80 31l4-8 3 9" fill="#fbe3ea" stroke="#5a2232" stroke-width="2.5"/>
+           <circle cx="79" cy="41" r="2" fill="#5a2232"/><path d="M46 70l-4 10M68 70l4 10" stroke="#5a2232" stroke-width="4" stroke-linecap="round"/>`,
+  SSKIP: `<path d="M14 30l18 22-18 22M38 30l18 22-18 22M62 30l18 22-18 22" stroke="#0b2236" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+  STF5: `<path d="M14 52q36-36 72 0q-36 36-72 0z" fill="#fff" stroke="#330a26" stroke-width="5"/><circle cx="50" cy="52" r="12" fill="#330a26"/>
+         <text x="50" y="92" font-size="16" font-weight="800" fill="#330a26" text-anchor="middle">5×</text>`,
+  ALTER5: `<path d="M14 42q36-30 72 0q-36 30-72 0z" fill="#fff" stroke="#1e0f38" stroke-width="5"/><circle cx="50" cy="42" r="10" fill="#1e0f38"/>
+           <path d="M18 72h30M42 65l8 7-8 7M82 72H52M58 65l-8 7 8 7" stroke="#1e0f38" stroke-width="4" fill="none"/>
+           <text x="50" y="96" font-size="14" font-weight="800" fill="#1e0f38" text-anchor="middle">5×</text>`,
+  SWAP: `<rect x="22" y="18" width="34" height="14" rx="3" fill="#0f2f30"/><rect x="22" y="76" width="34" height="14" rx="3" fill="#0f2f30" opacity=".55"/>
+         <path d="M70 26v52M62 68l8 10 8-10M62 36l8-10 8 10" stroke="#0f2f30" stroke-width="5" fill="none" stroke-linejoin="round"/>
+         <rect x="22" y="40" width="34" height="28" rx="3" fill="#0f2f30" opacity=".2"/>`,
+  GARB: `<rect x="28" y="36" width="44" height="48" rx="5" fill="#2e2e22"/><rect x="22" y="26" width="56" height="9" rx="3" fill="#2e2e22"/><rect x="42" y="18" width="16" height="7" rx="2" fill="#2e2e22"/>
+         <path d="M40 44v32M50 44v32M60 44v32" stroke="#8c8c6a" stroke-width="3.5"/>`,
+  CATOMIC: `<ellipse cx="50" cy="52" rx="34" ry="12" stroke="#3a2a00" stroke-width="4" fill="none"/>
+            <ellipse cx="50" cy="52" rx="34" ry="12" stroke="#3a2a00" stroke-width="4" fill="none" transform="rotate(60 50 52)"/>
+            <ellipse cx="50" cy="52" rx="34" ry="12" stroke="#3a2a00" stroke-width="4" fill="none" transform="rotate(-60 50 52)"/>
+            <circle cx="50" cy="52" r="10" fill="#1b1b1f"/><path d="M43 45l2-7 4 5M57 45l-2-7-4 5" fill="#1b1b1f"/>`,
+  // a card held up, a spotlight on it
+  MARK: `<path d="M50 14l26 70H24z" fill="#fff" opacity=".45"/><rect x="34" y="40" width="32" height="44" rx="4" fill="#fff" stroke="#3d1f0e" stroke-width="4" transform="rotate(-8 50 62)"/>
+         <text x="50" y="72" font-size="22" font-weight="900" fill="#3d1f0e" text-anchor="middle" transform="rotate(-8 50 62)">!</text>`,
+  // a cat face with a blindfold over its eyes
+  CURSE: `<path d="M30 36l6-14 9 11M70 36l-6-14-9 11" fill="#2a2238"/><circle cx="50" cy="54" r="24" fill="#2a2238"/>
+          <rect x="22" y="44" width="56" height="12" rx="5" fill="#d9d2e8"/><path d="M78 50q8 2 10 10M78 48q10-2 12 4" stroke="#d9d2e8" stroke-width="3" fill="none"/>
+          <path d="M44 66q6 4 12 0" stroke="#d9d2e8" stroke-width="2.5" fill="none"/>`,
 };
 
 const textColor = (t) => (['EK', 'IK', 'NOPE'].includes(t) ? '#fff' : '#17130f');

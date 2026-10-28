@@ -68,8 +68,8 @@ export function cuesFor(events, ctx) {
       }
       case 'resolve':
         if (!e.ok) break;
-        if (e.card === 'STF' || e.card === 'ALTER') { S('whoosh', e.by); A({ fx: 'flash', el: 'deck', color: 'var(--accent)' }); t += 300; }
-        else if (e.card === 'SKIP') { S('whoosh', e.by, { pitch: 1.6 }); t += 200; }
+        if (e.card === 'STF' || e.card === 'ALTER' || e.card === 'STF5' || e.card === 'ALTER5') { S('whoosh', e.by); A({ fx: 'flash', el: 'deck', color: 'var(--accent)' }); t += 300; }
+        else if (e.card === 'SKIP' || e.card === 'SSKIP') { S('whoosh', e.by, { pitch: 1.6 }); t += 200; }
         break;
       case 'draw': {
         S('cardDeal', e.seat);
@@ -159,6 +159,53 @@ export function cuesFor(events, ctx) {
         break;
       case 'win':
         out.push({ at: t + 300, c: { kind: mine(e.seat) ? 'win' : 'lose' } });
+        break;
+      // ---- Streaking pack
+      case 'handboom': // a kitten went off in a hand
+        S('ominous', e.seat);
+        R(e.seat, 'panic', 1400);
+        A({ fx: 'shake', el: mine(e.seat) ? 'hand' : seatEl(e.seat) });
+        t += 300;
+        break;
+      case 'flip':
+        S('cardFlip', e.seat);
+        t += 160;
+        break;
+      case 'lost':
+        S('miss', e.seat);
+        t += 150;
+        break;
+      case 'curse':
+        S('ominous', e.seat);
+        R(e.seat, 'annoyed');
+        A({ fx: 'float', el: mine(e.seat) ? 'hand' : seatEl(e.seat), text: 'Blind!', color: 'var(--warm)' });
+        t += 300;
+        break;
+      case 'mark':
+        S('cardFlip', e.seat);
+        A({ fx: 'flash', el: mine(e.seat) ? 'hand' : seatEl(e.seat), color: 'var(--accent)' });
+        t += 200;
+        break;
+      case 'catomic':
+        S('hit', e.seat);
+        A({ fx: 'shake', el: 'deck' });
+        A({ fx: 'float', el: 'deck', text: `${e.kittens} on top`, color: 'var(--bad)' });
+        t += 450;
+        break;
+      case 'swap':
+        S('cardSlide', e.seat);
+        A({ fx: 'shake', el: 'deck' });
+        t += 250;
+        break;
+      case 'trash':
+        S('cardSlide', e.seat);
+        if (!mine(e.seat)) A({ fx: 'fly', from: seatEl(e.seat), to: 'deck' });
+        t += 200;
+        break;
+      case 'garbage':
+        S('shuffle');
+        A({ fx: 'shake', el: 'deck' });
+        t += 520;
         break;
       default:
         break;

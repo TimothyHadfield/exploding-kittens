@@ -76,3 +76,30 @@ test('a local room of computers plays to the end', async () => {
   assert.equal(snap.pub.phase, 'over');
   assert.ok(snap.pub.winner >= 0);
 });
+
+test('Streaking pack online: only Marked cards show, a blind player sees only backs, views match', () => {
+  let marked = 0, blindSeen = 0, checked = 0;
+  for (const [i, opts] of [{ edition: 'original', players: 4, streak: true }, { edition: 'imploding', players: 5, streak: true, level: 'hard' }].entries()) {
+    for (let k = 0; k < 4; k++) {
+      const end = playThrough(300 + i * 10 + k, opts, (s) => {
+        assert.equal(s.cfg.streak, true);
+        const pub = game.publicView(s);
+        assert.ok(!('trashBin' in pub), 'Garbage Collection cards stay secret');
+        for (let j = 0; j < s.hands.length; j++) {
+          for (const c of pub.hands[j]) {
+            if (c.t === '?') continue;
+            assert.equal(c.mk, true); marked++;
+            assert.ok(s.hands[j].some((x) => x.id === c.id && x.mk));
+          }
+          const mine = game.privateView(s, j);
+          if (s.blind[j]) { blindSeen++; for (const c of mine.hand) assert.ok(c.t === '?' || c.mk); }
+          const g = mergeView(pub, mine, j);
+          assert.deepEqual(view(g, j), view(s, j));
+          checked++;
+        }
+      });
+      assert.equal(end.phase, 'over');
+    }
+  }
+  assert.ok(marked > 0 && blindSeen > 0 && checked > 500, `marked ${marked}, blind ${blindSeen}, checked ${checked}`);
+});

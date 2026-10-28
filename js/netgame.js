@@ -22,7 +22,8 @@ export const game = {
   publicView(s) {
     return {
       v: s.v, cfg: s.cfg,
-      hands: s.hands.map((h) => h.map(HIDDEN)),
+      // Streaking pack: a Marked card is face out for everyone
+      hands: s.hands.map((h) => h.map((c) => (c.mk ? { id: c.id, t: c.t, mk: true } : HIDDEN()))),
       out: s.out.map((h) => h.map(HIDDEN)),
       // only the face-up Imploding Kitten is visible in the pile
       deck: s.deck.map((c) => (c.t === 'IK' && c.up ? { id: 0, t: 'IK', up: true } : HIDDEN())),
@@ -30,16 +31,19 @@ export const game = {
       alive: s.alive, discard: s.discard, gone: [], removed: s.removed.map(HIDDEN),
       cur: s.cur, dir: s.dir, turns: s.turns, attacked: s.attacked, phase: s.phase,
       pending: s.pending, turnNo: s.turnNo, winner: s.winner, defusesUsed: s.defusesUsed,
+      ...(s.blind ? { blind: s.blind } : {}),
       log: s.log.filter((e) => !e.vis),
     };
   },
   privateView(s, seat) {
     if (seat == null || seat < 0 || !s.hands[seat]) return null;
     const p = s.pending;
+    // cursed (blind): even your own cards stay face down, apart from Marked ones
+    const blind = !!(s.blind && s.blind[seat]);
     return {
-      hand: s.hands[seat],
+      hand: blind ? s.hands[seat].map((c) => (c.mk ? c : HIDDEN())) : s.hands[seat],
       plog: s.log.filter((e) => e.vis && e.vis.includes(seat)),
-      top: s.phase === 'alter' && p && p.seat === seat ? s.deck.slice(0, 3) : null,
+      top: s.phase === 'alter' && p && p.seat === seat ? s.deck.slice(0, p.n || 3) : null,
     };
   },
   bot(ctx, seat, rng = Math.random) {

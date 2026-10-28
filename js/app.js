@@ -2,20 +2,20 @@
 // template strings, data-* attributes + event delegation.
 import { CARD, EDITIONS, boxFor } from './cards.js';
 import { newGame, apply, view, waitingOn, comboKind } from './engine.js';
-import { decide, assess, placeWeights, habitOpts, makeRng } from './ai.js?v=10';
+import { decide, assess, placeWeights, habitOpts, makeRng } from './ai.js?v=13';
 import { beliefFromLog } from './odds.js';
-import { cardSVG, backSVG } from './art.js?v=8';
+import { cardSVG, backSVG } from './art.js?v=13';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML, settingsTap } from './ui.js';
 import { renderTable, tableClick, tableInput, tableEvents } from './table.js';
 import './fx.js?v=8';
 import './tablekit.js?v=8';
-import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=10';
+import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=13';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js?v=a3d0418b';
 import { seenAfterReload, handGeom, nameMode, crowded, keepSel } from './guards.js?v=12';
 import * as EKP from './ekprofile.js?v=10';
-import * as EKC from './ekcoach.js?v=12';
+import * as EKC from './ekcoach.js?v=13';
 import { faceSVG, momentSVG } from './faces.js?v=10';
 import { replaySteps, replayHTML } from './replay.js?v=10';
 
@@ -27,7 +27,7 @@ const BOT_NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fay', 'Gus', 'Hal', 'Ivy'];
 // ------------------------------------------------------------------ state
 const S = {
   tab: 'play',
-  settings: { fast: false, stack: true, five: true, twoBoth: false, study: false, odds: true, speed: 'normal' },
+  settings: { fast: false, stack: true, five: true, twoBoth: false, streak: false, study: false, odds: true, speed: 'normal' },
   setup: { edition: 'original', players: 4, seats: null },
   game: null, seats: null, viewer: 0, shown: -1, sel: [], hint: null, review: [], seenLog: 0,
   gen: 0, sheet: null, newIds: new Set(),
@@ -132,12 +132,25 @@ function describe(e, me) {
     case 'attack': return `<b>${n(e.to)}</b> must take <b>${e.turns}</b> turns.`;
     case 'reverse': return 'Play order reversed.';
     case 'gave': return `${n(e.from)} gave ${n(e.to)} a card.`;
-    case 'stole': return `${n(e.to)} stole a card from ${n(e.from)}.`;
+    case 'stole': return e.mk ? `${n(e.to)} stole the marked <b>${cname(e.mk)}</b> from ${n(e.from)}.` : `${n(e.to)} stole a card from ${n(e.from)}.`;
     case 'moved': return e.toSeat === me ? `You got <b>${cname(e.card)}</b>.` : `You lost <b>${cname(e.card)}</b>.`;
     case 'named': return e.ok ? `${n(e.from)} handed over <b>${cname(e.name)}</b>.` : `${n(e.from)} had no ${cname(e.name)}.`;
     case 'picked': return `${n(e.seat)} took <b>${cname(e.card)}</b> from the discard pile.`;
     case 'empty': return `${n(e.seat)} had no cards.`;
     case 'win': return `🏆 <b>${n(e.seat)}</b> win${e.seat === me ? '' : 's'}!`;
+    // Streaking pack
+    case 'kept': return 'You drew an <b>Exploding Kitten</b> and kept it: your Streaking Kitten holds it. Nobody else knows.';
+    case 'handboom': return `💥 A kitten went off in ${e.seat === me ? 'your' : '<b>' + esc(name(e.seat)) + '</b>’s'} hand!`;
+    case 'flip': return `${n(e.seat)} turned over <b>${cname(e.card)}</b>.`;
+    case 'lost': return `${e.seat === me ? 'You lose' : n(e.seat) + ' loses'} <b>${cname(e.card)}</b>.`;
+    case 'sees': return e.seat === me ? 'You can see your cards again.' : `${n(e.seat)} can see again.`;
+    case 'curse': return `<b>${n(e.seat)}</b> ${e.seat === me ? 'are' : 'is'} cursed: playing blind until a safe draw.`;
+    case 'mark': return `${e.seat === me ? 'Your' : esc(name(e.seat)) + '’s'} <b>${cname(e.card)}</b> is marked: face out for all to see.`;
+    case 'catomic': return `<b>${e.kittens}</b> kitten${e.kittens === 1 ? '' : 's'} now on top of the pile!`;
+    case 'swap': return `${n(e.seat)} swapped the top and bottom cards.`;
+    case 'trash': return `${n(e.seat)} put a card in the pile.`;
+    case 'trashed': return `You put in <b>${cname(e.card)}</b>.`;
+    case 'garbage': return `The pile was shuffled with ${e.size} new card${e.size === 1 ? '' : 's'}.`;
     default: return '';
   }
 }
@@ -221,7 +234,7 @@ function renderSetup() {
     try {
       const g = newGame({ ...S.settings, edition: su.edition, players: su.players }, 1);
       const e = g.log[0];
-      return `${e.deck} cards in the pile · ${e.ek + e.ik} kitten${e.ek + e.ik > 1 ? 's' : ''} · hands of 8`;
+      return `${e.deck} cards in the pile · ${e.ek + e.ik} kitten${e.ek + e.ik > 1 ? 's' : ''} · hands of 8${e.streak ? ' · Streaking pack' : ''}`;
     } catch (err) { return esc(err.message); }
   })();
   $('#v-play').innerHTML = `<div class="scroll" style="flex:1"><div class="setup">
@@ -334,7 +347,7 @@ function renderLobby() {
 async function createRoom() {
   const su = S.setup;
   const seats = su.seats.map((x) => (x.type === 'bot' ? { kind: 'computer', name: x.name } : x.type === 'online' ? 'empty' : 'human'));
-  const options = { edition: su.edition, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth, levels: su.seats.map((x) => (x.type === 'bot' ? x.level : null)) };
+  const options = { edition: su.edition, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth, streak: !!S.settings.streak, levels: su.seats.map((x) => (x.type === 'bot' ? x.level : null)) };
   toast('Making a room…');
   const r = await getNet().createRoom({ name: myName(), seats, options });
   if (!r.ok) toast(r.message);
@@ -365,7 +378,7 @@ function startGame(kind) {
     seed = EKC.SEED;
   } else {
     if (!su.seats.some((x) => x.type !== 'bot')) su.seats[0] = { type: 'me', name: su.seats[0].name || 'You' };
-    cfg = { edition: su.edition, players: su.players, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth };
+    cfg = { edition: su.edition, players: su.players, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth, streak: !!S.settings.streak };
     seats = su.seats.map((x) => ({ ...x }));
   }
   let ng;
@@ -507,6 +520,7 @@ function act(a, fromBot = false) {
 function summarize(v, a) {
   if (!a) return '';
   if (a.type === 'draw') return 'Draw';
+  if (a.type === 'blind') return 'Play a random card';
   if (a.type !== 'play') return a.type;
   const ts = a.cards.map((id) => (v.hand.find((c) => c.id === id) || {}).t);
   if (ts.length === 1) return cname(ts[0]);
@@ -514,7 +528,7 @@ function summarize(v, a) {
 }
 function sameAction(a, b) {
   if (a.type !== b.type) return false;
-  if (a.type === 'draw') return true;
+  if (a.type !== 'play') return true;
   return a.cards.length === b.cards.length;
 }
 
@@ -607,7 +621,7 @@ function tenseDraw(seat, fromBot = false) {
 // ------------------------------------------------------------------ odds helpers
 function trackerRows(v, b) {
   const g = S.game;
-  const box = boxFor(g.cfg.edition, g.cfg.players);
+  const box = boxFor(g.cfg.edition, g.cfg.players, g.cfg.streak);
   const setup = v.log.find((e) => e.t === 'setup');
   const P = g.cfg.players;
   const inGame = { ...box };
@@ -619,7 +633,7 @@ function trackerRows(v, b) {
   for (const c of v.hand || []) mine[c.t] = (mine[c.t] || 0) + 1;
   return Object.keys(inGame).filter((t) => inGame[t] > 0).map((t) => {
     let unseen = inGame[t] - (disc[t] || 0) - (mine[t] || 0);
-    if (t === 'EK') unseen = b ? b.nE : unseen;
+    if (t === 'EK') unseen = b ? Math.round(b.nE * 10) / 10 : unseen; // Streaking pack: an estimate
     return { t, inGame: inGame[t], disc: disc[t] || 0, mine: mine[t] || 0, unseen: Math.max(0, unseen) };
   });
 }
@@ -662,7 +676,9 @@ function renderPlay() {
   const pU = b ? b.prob(0, 'U') : 0;
   const pDanger = pE + pU;
   S.danger = pDanger; // for the drumroll before a risky draw
-  const kittens = b ? b.nE + ((g.ikIn ?? g.deck.some((c) => c.t === 'IK')) ? 1 : 0) : 0;
+  const kittens0 = b ? b.nE + ((g.ikIn ?? g.deck.some((c) => c.t === 'IK')) ? 1 : 0) : 0;
+  // Streaking pack: someone may be holding a kitten, so the count is an estimate
+  const kittens = Number.isInteger(kittens0) ? kittens0 : '≈' + kittens0.toFixed(1);
   const dial = S.settings.odds ? `<div class="dial">${dialHTML(pDanger, 'next is a kitten')}
       <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. Computers hide kittens by habit (Hard: usually right where the next player draws, sometimes deeper), and the odds use that; when a person hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
       ${futureHTML(b)}
@@ -709,12 +725,15 @@ function renderPlay() {
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
     const face = S.seats[s].type === 'bot' ? `<span class="av">${faceSVG(s, moodOf(s), crowd ? 18 : 22)}</span>` : '';
     const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="lvl">away</span>' : '';
-    const peek = study && v.hands ?`<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
+    const marked = !study && v.marks && v.marks[s] && v.marks[s].length ? v.marks[s] : null; // Mark: face out for all
+    const peek = study && v.hands ? `<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>`
+      : marked ? `<div class="peek" title="Marked cards">${marked.map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
+    const blindTag = v.blind && v.blind[s] ? ' <span class="blindtag">blind</span>' : '';
     const n = oppSeats.length, t = n > 1 ? Math.abs((i / (n - 1)) * 2 - 1) : 0;
     const k = Math.min(crowd ? 4 : 7, v.handCounts[s]);
     const backs = Array.from({ length: k }, (_, b) => `<i style="--i:${b};--r:${k > 1 ? ((b / (k - 1)) * 2 - 1) * 14 : 0}deg"></i>`).join('');
     return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}" data-seat="${s}" style="--arc:${Math.round(t * t * 30)}px">${turnBadge}
-      <div class="nm">${face}${esc(name(s))}${lvl ? ` <span class="lvl">${lvl}</span>` : ''}${away}</div>
+      <div class="nm">${face}${esc(name(s))}${lvl ? ` <span class="lvl">${lvl}</span>` : ''}${away}${blindTag}</div>
       <div class="meta">${g.alive[s] ? `<span class="mini" style="--n:${k}">${backs}</span><span class="cnt">${v.handCounts[s]}</span>${v.defusesUsed[s] ? `<span class="du" title="Defuses used">D−${v.defusesUsed[s]}</span>` : ''}` : `<span class="outcard">${cardSVG('EK')}</span><span class="cnt">out</span>`}</div>
       ${peek}<div class="think"><i></i><i></i><i></i></div></div>`;
   }).join('');
@@ -722,8 +741,10 @@ function renderPlay() {
   // status line: whose turn + last thing that happened
   const lastLines = v.log.map((e) => describe(e, me)).filter(Boolean);
   const myTurn = g.phase === 'turn' && g.cur === me;
+  const iAmBlind = !!(v.blind && v.blind[me]); // Curse of the Cat Butt: your hand is face down
   let status;
   if (g.phase === 'over') status = lastLines[lastLines.length - 1];
+  else if (myTurn && iAmBlind) status = `<b class="you">Your turn</b>${g.turns > 1 ? ` · ${g.turns} turns to take` : ''} — you're blind: play a random card, or draw. <span class="muted">${lastLines[lastLines.length - 1] || ''}</span>`;
   else if (myTurn) status = `<b class="you">Your turn</b>${g.turns > 1 ? ` · ${g.turns} turns to take` : ''} — play cards, then draw. <span class="muted">${lastLines[lastLines.length - 1] || ''}</span>`;
   else status = lastLines[lastLines.length - 1] || '';
 
@@ -733,9 +754,11 @@ function renderPlay() {
   const fan = handFan(hand.length);
   const tight = fan.L.length > 1 && fan.L[0].step < fan.cw - 8; // overlapped: draw each card's art inside its visible strip
   // too tight for names across the top: they run down each card's visible strip
-  const nm = nameMode(fan.L, fan.cw, fan.ch, hand.map((c) => CARD[c.t].short));
+  const nm = nameMode(fan.L, fan.cw, fan.ch, hand.map((c) => (CARD[c.t] || CARD.TACO).short));
   const edge = nm.mode === 'edge' ? nm : null;
-  const handHtml = hand.length ? `<div class="fanbox" style="width:${fan.W}px">${hand.map((c, i) => { const p = fan.L[i]; return `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}" style="--x:${p.x}px;--y:${(p.y - fan.drop).toFixed(1)}px;--r:${p.r}deg;z-index:${i + 1}">${cardSVG(c.t, edge && i < hand.length - 1 ? { edge } : { tight })}</button>`; }).join('')}</div>`
+  const handHtml = hand.length ? `<div class="fanbox" style="width:${fan.W}px">${hand.map((c, i) => { const p = fan.L[i]; const pos = `--x:${p.x}px;--y:${(p.y - fan.drop).toFixed(1)}px;--r:${p.r}deg;z-index:${i + 1}`;
+      if (c.t === 'BACK') return `<button class="card" disabled aria-label="Face-down card" style="${pos}">${backSVG()}</button>`;
+      return `<button class="card ${S.sel.includes(c.id) ? 'sel' : ''} ${hintIds.includes(c.id) ? 'hint' : ''} ${S.newIds.has(c.id) ? 'new' : ''} ${c.mk ? 'mk' : ''}" data-card="${c.id}" aria-label="${esc(cname(c.t))}${c.mk ? ' (marked)' : ''}" style="${pos}">${cardSVG(c.t, edge && i < hand.length - 1 ? { edge } : { tight })}</button>`; }).join('')}</div>`
     : !g.alive[me] ? `<div class="fanbox outme">${cardSVG('EK')}</div>` : '';
 
   // play button
@@ -790,7 +813,8 @@ function renderPlay() {
   const undoBtn = !S.net && S.mode !== 'daily' && humans().length === 1 ? `<button class="btn undo" data-undo aria-label="Undo your last move" title="Undo" ${canUndo() ? '' : 'disabled'}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>` : '';
   $('#p-acts').classList.toggle('has-undo', !!undoBtn);
   patch('p-acts', `${undoBtn}<button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
-          <button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>
+          ${iAmBlind ? `<button class="btn warm" data-blindplay ${myTurn && hand.length ? '' : 'disabled'}>Play a random card</button>`
+    : `<button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>`}
           <button class="btn primary" data-draw ${myTurn ? '' : 'disabled'}>Draw</button>`);
   const sideNew = patch('p-side', tracker + logHtml);
   // the log only shows on laptop width; reading scrollHeight forces a full layout, so do it after paint
@@ -848,7 +872,7 @@ function playOnto(rects) {
   return n;
 }
 
-const ORDER = ['DEF', 'NOPE', 'ATK', 'TATK', 'SKIP', 'REV', 'STF', 'ALTER', 'SHUF', 'BOTTOM', 'FAV', 'FERAL', 'TACO', 'MELON', 'POTATO', 'BEARD', 'RAINBOW'];
+const ORDER = ['EK', 'STREAK', 'DEF', 'NOPE', 'ATK', 'TATK', 'SKIP', 'SSKIP', 'REV', 'CATOMIC', 'STF', 'STF5', 'ALTER', 'ALTER5', 'SHUF', 'SWAP', 'GARB', 'BOTTOM', 'FAV', 'MARK', 'CURSE', 'FERAL', 'TACO', 'MELON', 'POTATO', 'BEARD', 'RAINBOW'];
 const order = (t) => ORDER.indexOf(t);
 
 // When a different sheet pops up (its heading changed), note the time: taps
@@ -926,8 +950,30 @@ function renderPromptInner(v, b, rows, lines) {
     return;
   }
   if (g.phase === 'favor' && p && p.target === me) {
+    if (v.blind && v.blind[me]) {
+      sheet(`<h3>Favor for ${esc(name(p.by))}</h3><p>You're blind, so a random card goes.</p>
+        <div class="btns"><button class="btn primary" data-give="rand">Give a random card</button></div>`);
+      return;
+    }
     sheet(`<h3>Favor for ${esc(name(p.by))}</h3><p>Pick a card to give away.</p>
       <div class="cards-pick">${v.hand.map((c) => `<button data-give="${c.id}">${cardSVG(c.t)}</button>`).join('')}</div>`);
+    return;
+  }
+  // Streaking pack: Garbage Collection, and aiming a card turned over blind
+  if (g.phase === 'garbage' && p && p.need.includes(me) && !p.done.includes(me)) {
+    if (v.blind && v.blind[me]) {
+      sheet(`<h3>Garbage Collection</h3><p>Everyone puts a card in the pile. You're blind, so a random card goes.</p>
+        <div class="btns"><button class="btn primary" data-trash="rand">Put in a random card</button></div>`);
+      return;
+    }
+    sheet(`<h3>Garbage Collection</h3><p>Everyone puts a card in the pile, then it is shuffled. Pick yours.</p>
+      <div class="cards-pick">${v.hand.map((c) => `<button data-trash="${c.id}">${cardSVG(c.t)}</button>`).join('')}</div>`);
+    return;
+  }
+  if (g.phase === 'btarget' && p && p.seat === me) {
+    const tgs = g.alive.map((a, i) => (a && (i !== me || p.card === 'TATK') ? i : -1)).filter((i) => i >= 0);
+    sheet(`<h3>You turned over ${esc(cname(p.card))}</h3><p>Pick a player.</p>
+      <div class="choices">${tgs.map((s) => `<button class="btn" data-btarget="${s}"><b>${s === me ? 'You' : esc(name(s))}</b><small class="muted">${g.hands[s].length} cards</small></button>`).join('')}</div>`);
     return;
   }
   if ((g.phase === 'defuse' || g.phase === 'implode') && p && p.seat === me) {
@@ -935,7 +981,7 @@ function renderPromptInner(v, b, rows, lines) {
     const pos = S.place != null ? Math.min(S.place, N) : 0;
     const imp = g.phase === 'implode';
     sheet(`<h3>${imp ? 'Imploding Kitten!' : 'Defused!'}</h3>
-      <p>${imp ? 'Put it back <b>face up</b> — everyone will see it coming.' : 'Hide the kitten anywhere in the pile. Only you will know where.'}</p>
+      <p>${imp ? 'Put it back <b>face up</b> — everyone will see it coming.' : p.keep ? 'A kitten went off in your hand. Hide it anywhere in the pile; then carry on.' : 'Hide the kitten anywhere in the pile. Only you will know where.'}</p>
       <div class="spot" id="spot">${spotLabel(pos, N)}</div>
       <input type="range" class="slider" min="0" max="${N}" value="${pos}" data-place aria-label="Spot in the pile">
       <div class="row muted" style="font-size:12px;justify-content:space-between"><span>Top</span><span>${N} cards</span><span>Bottom</span></div>
@@ -946,13 +992,13 @@ function renderPromptInner(v, b, rows, lines) {
   if (g.phase === 'alter' && p && p.seat === me) {
     if (!S.alter || S.alter.n !== g.log.length) S.alter = { n: g.log.length, order: p.top.map((c) => c.id), pick: null };
     const byId = Object.fromEntries(p.top.map((c) => [c.id, c]));
-    sheet(`<h3>Alter the Future</h3><p>${p.top.length > 1 ? 'Tap two cards to swap them. Left is drawn first.' : 'Only one card is left, so there is nothing to swap.'}</p>
+    sheet(`<h3>Alter the Future${p.top.length > 3 ? ' (5x)' : ''}</h3><p>${p.top.length > 1 ? 'Tap two cards to swap them. Left is drawn first.' : 'Only one card is left, so there is nothing to swap.'}</p>
       <div class="cards-pick big">${S.alter.order.map((id) => `<button data-swap="${id}" class="${S.alter.pick === id ? 'on' : ''}">${cardSVG(byId[id].t.replace('+', ''), { up: byId[id].t.endsWith('+') })}</button>`).join('')}</div>
       <div class="btns"><button class="btn primary" data-alterdone>Done</button></div>`);
     return;
   }
   if (g.phase === 'pick' && p && p.seat === me) {
-    const ok = v.discard.filter((c) => !p.exclude.includes(c.id));
+    const ok = v.discard.filter((c) => !p.exclude.includes(c.id) && c.t !== 'STREAK');
     const uniq = []; const seen = new Set();
     for (const c of ok) if (!seen.has(c.t)) { seen.add(c.t); uniq.push(c); }
     sheet(`<h3>Take a card from the discard</h3><p>Five different cards: pick any one.</p>
@@ -976,7 +1022,7 @@ function promptTarget() {
 }
 function promptName() {
   const g = S.game;
-  const types = Object.keys(boxFor(g.cfg.edition, g.cfg.players)).filter((t) => t !== 'EK' && t !== 'IK');
+  const types = Object.keys(boxFor(g.cfg.edition, g.cfg.players, g.cfg.streak)).filter((t) => t !== 'EK' && t !== 'IK');
   sheet(`<h3>Name a card</h3><p>If ${esc(name(S.sheet.target))} has one, it's yours.</p>
     <div class="choices">${types.map((t) => `<button class="btn small" data-name="${t}">${CARD[t].name}</button>`).join('')}</div>
     <div class="btns"><button class="btn ghost" data-close>Cancel</button></div>`);
@@ -1038,6 +1084,7 @@ function renderSettings() {
       ${sw('five', 'Five-card combo', 'Five different cards: take any card from the discard', 'In earlier printings and the Party Pack rules; the 2025 Original Edition sheet leaves it out.')}
       ${sw('fast', 'Faster game', 'Removes about a third of the deck unseen (best for 2–3 players)', 'Official variant: fewer cards means kittens come up sooner.')}
       ${sw('twoBoth', 'Two-player: both kittens', 'Imploding deck, 2 players: 1 Exploding + the Imploding Kitten', 'Official two-player variant from the Imploding Kittens rules. Whoever dies first loses.')}
+      ${sw('streak', 'Streaking pack', 'Adds 15 cards from the Streaking Kittens expansion (not with the Party Pack)', 'Official expansion: the Streaking Kitten (hold one kitten safely), Super Skip, See and Alter the Future 5x, Swap Top and Bottom, Garbage Collection, Catomic Bomb, Mark, Curse of the Cat Butt, and one more Exploding Kitten. Rules are in Rules, under Options.')}
     </div><p class="muted" style="font-size:12.5px;margin:6px 0 0">Rule changes apply to the next game.</p></div>
     <div class="panel"><h2>Help</h2><div class="list">
       ${sw('odds', 'Show odds', 'Kitten chance, next cards, Nope risk')}
@@ -1130,8 +1177,8 @@ function onClick(e) {
     if (!kind) { S.sel = keepSel(S.sel, hand); render(); return; }
     if (kind === 'five' && !g.discard.length) return;
     S.lastTap = Date.now();
-    if (kind === 'pair' || kind === 'triple' || types[0] === 'FAV' || (kind === 'single' && types[0] === 'TATK')) {
-      S.sheet = { type: 'target', kind, cards: S.sel.slice(), allowSelf: kind === 'single' && types[0] === 'TATK', title: kind === 'pair' ? 'Steal a random card from…' : kind === 'triple' ? 'Ask who?' : types[0] === 'FAV' ? 'Ask a Favor from…' : 'Targeted Attack on…' };
+    if (kind === 'pair' || kind === 'triple' || (kind === 'single' && ['FAV', 'TATK', 'MARK', 'CURSE'].includes(types[0]))) {
+      S.sheet = { type: 'target', kind, cards: S.sel.slice(), allowSelf: kind === 'single' && types[0] === 'TATK', title: kind === 'pair' ? 'Steal a random card from…' : kind === 'triple' ? 'Ask who?' : types[0] === 'FAV' ? 'Ask a Favor from…' : types[0] === 'MARK' ? 'Mark a card of…' : types[0] === 'CURSE' ? 'Curse…' : 'Targeted Attack on…' };
       render(); return;
     }
     act({ type: 'play', seat: me, cards: S.sel.slice() }); return;
@@ -1150,7 +1197,10 @@ function onClick(e) {
   }
   if ('pass' in d) { closeSheet(); act({ type: 'pass', seat: me }); return; }
   if ('nope' in d) { const c = g.hands[me].find((x) => x.t === 'NOPE'); closeSheet(); if (c) act({ type: 'nope', seat: me, card: c.id }); return; }
-  if (d.give) { closeSheet(); act({ type: 'give', seat: me, card: +d.give }); return; }
+  if (d.give) { closeSheet(); act({ type: 'give', seat: me, card: d.give === 'rand' ? null : +d.give }); return; }
+  if (d.trash) { closeSheet(); act({ type: 'trash', seat: me, card: d.trash === 'rand' ? null : +d.trash }); return; }
+  if (d.btarget) { closeSheet(); act({ type: 'btarget', seat: me, target: +d.btarget }); return; }
+  if ('blindplay' in d) { if (Date.now() - (S.lastTap || 0) < 450) return; S.lastTap = Date.now(); act({ type: 'blind', seat: me }); return; }
   if (d.placeat) {
     const N = g.deck.length;
     S.place = d.placeat === 'rand' ? Math.floor(Math.random() * (N + 1)) : +d.placeat;
@@ -1176,8 +1226,10 @@ function onClick(e) {
 function hintText(v, best, A) {
   const pct = fmtPct(A.pDeath);
   const known = A.top[0];
+  if (best.type === 'blind') return `Play a random card — ${pct} kitten chance, and it might get you out of the draw.`;
   if (best.type === 'draw') {
     if (known === 'S') return `Draw — you know the top card is safe.`;
+    if (A.keeps && known !== 'U') return 'Draw — you hold the Streaking Kitten, so a kitten drawn now stays safely in your hand.';
     return `Draw — ${pct} kitten chance${A.hasDef ? ' and you hold a Defuse' : ''}. Save your cards for later.`;
   }
   const ts = best.cards.map((id) => v.hand.find((c) => c.id === id).t);
@@ -1188,7 +1240,7 @@ function hintText(v, best, A) {
     return A.hasDef ? 'Play your pair to steal — cat cards do nothing on their own.' : 'Play your pair to steal — you might get a Defuse.';
   }
   const t = ts[0];
-  if (t === 'STF' || t === 'ALTER') return `${CARD[t].name}: ${pct} chance is high enough to look first.`;
+  if (t === 'STF' || t === 'ALTER' || t === 'STF5' || t === 'ALTER5') return `${CARD[t].name}: ${pct} chance is high enough to look first.`;
   if (t === 'FAV') return `Favor: you have no Defuse — ask the player most likely to hold one.`;
   return `${CARD[t].name} — ${why}.`;
 }

@@ -44,7 +44,8 @@ async function run([label, engine, w, h, mobile]) {
   page.setDefaultTimeout(8000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  // the pwa kit's version check (a HEAD fetch 1.5 s after load) is cut off when the test navigates away; WebKit logs that
+  page.on('console', (m) => { if (m.type() === 'error' && !/Fetch API cannot load .*\?nosw due to access control/.test(m.text())) errors.push(m.text()); });
   const shot = async (n) => { if (shots) await page.screenshot({ path: join(shots, `${label}-${n}.png`) }); };
   try {
     // ---- fresh visit: Play tab, offer once
@@ -141,14 +142,12 @@ async function run([label, engine, w, h, mobile]) {
     await shot('setup');
     await page.click('[data-daily]'); await wait(500);
     check(await page.evaluate(() => EK.S.mode === 'daily' && EK.S.game.seed === (window.Profile.daily.seed() | 0) && !document.querySelector('#p-acts [data-undo]')), `${label}: Daily = today's seed, no Undo`);
-    // dealing the Daily again carries on the same game; once it's played it can't be dealt again
-    check(await page.evaluate(() => { const n = EK.S.game.log.length, g = EK.S.game; EK.startGame('daily'); return EK.S.game === g && EK.S.game.log.length >= n; }), `${label}: Daily again = the same game carries on`);
-    check(await page.evaluate(() => { EK.S.recorded = false; EK.S.mine = 1; EK.startGame(); const st = window.Profile.stats().games; const g = EK.S.game; EK.startGame('daily'); return EK.S.mode !== 'daily' && EK.S.game === g && st === 2; }), `${label}: a left Daily counts once and can't be dealt again`);
 
     // ---- big moments
     await page.evaluate(() => { EK.FXDOM.moment({ kind: 'boom', mine: true }); });
-    await wait(900); await shot('boom');
+    await wait(150);
     check(await page.evaluate(() => !!document.querySelector('.moment.boom svg')), `${label}: kitten explosion moment draws`);
+    await wait(750); await shot('boom');
     await wait(1200);
     check(await page.evaluate(() => !document.querySelector('.moment')), `${label}: moment cleans itself up`);
     await page.evaluate(() => { EK.FXDOM.moment({ kind: 'defuse', mine: true }); });
@@ -160,6 +159,11 @@ async function run([label, engine, w, h, mobile]) {
     const rs = await page.evaluate(() => { const n = document.querySelector('.coach-rules-nav'); return n ? { sw: n.scrollWidth, cw: n.clientWidth, page: document.documentElement.scrollWidth, vw: innerWidth } : null; });
     check(rs && rs.sw <= rs.cw + 1 && rs.page <= rs.vw, `${label}: rules tabs fit (${rs && rs.sw}/${rs && rs.cw})`);
     await shot('rules');
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.evaluate(() => { if (window.COACH && COACH.rulesOpen()) document.querySelector('.coach-rules [aria-label]')?.click(); EK.startGame('daily'); });
+    // dealing the Daily again carries on the same game; once it's played it can't be dealt again
+    check(await page.evaluate(() => { const n = EK.S.game.log.length, g = EK.S.game; EK.startGame('daily'); return EK.S.game === g && EK.S.game.log.length >= n; }), `${label}: Daily again = the same game carries on`);
+    check(await page.evaluate(() => { EK.S.recorded = false; EK.S.mine = 1; EK.startGame(); const st = window.Profile.stats().games; const g = EK.S.game; EK.startGame('daily'); return EK.S.mode !== 'daily' && EK.S.game === g && st === 2; }), `${label}: a left Daily counts once and can't be dealt again`);
   } catch (e) { check(false, `${label}: ${e.message.split('\n')[0]}`); }
   check(!errors.length, `${label}: no console errors${errors.length ? ' — ' + errors.slice(0, 3).join(' | ') : ''}`);
   await browser.close();

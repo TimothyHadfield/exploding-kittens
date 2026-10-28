@@ -34,6 +34,8 @@ export function cuesFor(events, ctx) {
   const S = (s, seat, extra) => out.push({ at: t, s, o: { ...(vol(seat) || {}), ...(extra || {}) } });
   const A = (a, dt = 0) => out.push({ at: t + dt, a });
   const seatEl = (s) => ({ seat: s });
+  // a computer's face reacts for a moment (smug, panic, relieved...)
+  const R = (seat, mood, ms = 1600, dt = 0) => { if (seat != null && !mine(seat)) out.push({ at: t + dt, a: { fx: 'react', seat, mood, ms } }); };
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
     switch (e.t) {
@@ -58,6 +60,7 @@ export function cuesFor(events, ctx) {
         break;
       case 'nope': {
         S('stamp', e.seat, e.nopes % 2 ? undefined : { pitch: 1.25 });
+        R(e.seat, 'smug');
         A({ fx: 'pop', el: 'discard' });
         A({ fx: 'float', el: 'discard', text: e.nopes % 2 ? 'NOPE!' : 'YUP!', color: e.nopes % 2 ? 'var(--bad)' : 'var(--good)' });
         t += 260;
@@ -71,12 +74,17 @@ export function cuesFor(events, ctx) {
       case 'draw': {
         S('cardDeal', e.seat);
         if (!mine(e.seat)) A({ fx: 'fly', from: 'deck', to: seatEl(e.seat) });
+        if (e.res === 'E' || e.res === 'I' || e.res === 'U') R(e.seat, 'panic', 1400);
         t += 200;
         if (e.res === 'I') { S('ominous', e.seat); A({ fx: 'shake', el: 'deck' }); t += 300; }
         break;
       }
       case 'defuse':
+        // the big moment: the fuse gets snipped (full screen for you, small for others)
+        A({ fx: 'moment', kind: 'defuse', mine: mine(e.seat) });
+        if (mine(e.seat)) t += 520; // the cutters close on the snip
         S('snip', e.seat);
+        R(e.seat, 'relieved', 1800, 250);
         A({ fx: 'flash', el: 'felt', color: 'var(--good)' });
         A({ fx: 'float', el: 'felt', text: 'Defused!', color: 'var(--good)' });
         t += 250;
@@ -90,6 +98,9 @@ export function cuesFor(events, ctx) {
         t += 250;
         break;
       case 'explode':
+        // the big moment: a cartoon kitten's fuse burns down, then it blows
+        A({ fx: 'moment', kind: 'boom', mine: mine(e.seat) });
+        if (mine(e.seat)) t += 760;
         S('explosion', e.seat);
         A({ fx: 'boom' });
         A({ fx: 'shake', el: 'game' });
@@ -107,6 +118,7 @@ export function cuesFor(events, ctx) {
         break;
       case 'attack':
         S('hit', e.from);
+        R(e.from, 'smug'); R(e.to, 'panic', 1400);
         A({ fx: 'shake', el: seatEl(e.to) });
         A({ fx: 'float', el: seatEl(e.to), text: `${e.turns} turns`, color: 'var(--warm)' });
         t += 350;
@@ -117,16 +129,18 @@ export function cuesFor(events, ctx) {
         break;
       case 'gave':
         S('cardDeal', e.from);
+        R(e.from, 'annoyed');
         A({ fx: 'fly', from: seatEl(e.from), to: seatEl(e.to) });
         t += 250;
         break;
       case 'stole':
         S('snatch', e.to);
+        R(e.to, 'smug'); R(e.from, 'annoyed');
         A({ fx: 'fly', from: seatEl(e.from), to: seatEl(e.to) });
         t += 250;
         break;
       case 'named':
-        if (e.ok) { S('snatch', e.to); A({ fx: 'fly', from: seatEl(e.from), to: seatEl(e.to) }); }
+        if (e.ok) { S('snatch', e.to); A({ fx: 'fly', from: seatEl(e.from), to: seatEl(e.to) }); R(e.to, 'smug'); R(e.from, 'annoyed'); }
         else { S('miss', e.to); A({ fx: 'shake', el: seatEl(e.from) }); }
         t += 250;
         break;
@@ -204,8 +218,10 @@ function fire(cue, FX, dom) {
     if (cue.c) FX.celebrate({ kind: cue.c.kind, at: cue.c.el ? dom.el(cue.c.el) : undefined, colors: cue.c.kind === 'win' ? ['#f0b354', '#e0523f', '#6ea8fe', '#6ee7a8', '#e8eaf0'] : undefined });
     const a = cue.a;
     if (!a) return;
+    if (a.fx === 'react') { if (dom.react) dom.react(a); return; } // a face changing isn't motion: always
     if (!(FX.settings || {}).animations) return; // Animations off: nothing moves
     if (a.fx === 'boom') { if (dom.boom) dom.boom(); return; }
+    if (a.fx === 'moment') { if (dom.moment) dom.moment(a); return; }
     if (a.fx === 'fly') {
       const from = dom.el(a.from, 'from'), to = dom.el(a.to);
       if (from && to) FX.flyTo(from, to, { duration: 380, fade: true });

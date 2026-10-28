@@ -2,20 +2,24 @@
 // template strings, data-* attributes + event delegation.
 import { CARD, EDITIONS, boxFor } from './cards.js';
 import { newGame, apply, view, waitingOn, comboKind } from './engine.js';
-import { decide, assess, placeWeights } from './ai.js';
+import { decide, assess, placeWeights, habitOpts, makeRng } from './ai.js?v=10';
 import { beliefFromLog } from './odds.js';
 import { cardSVG, backSVG } from './art.js?v=8';
 import { $, esc, pctColor, fmtPct, toast, spotLabel, help, sheet, closeSheet, dialHTML, futureHTML, settingsTap } from './ui.js';
 import { renderTable, tableClick, tableInput, tableEvents } from './table.js';
 import './fx.js?v=8';
 import './tablekit.js?v=8';
-import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=8';
+import { cuesFor, runCues, tableCues, defineSounds, tensionOn, DANGER } from './sfx.js?v=10';
 import { renderLearn, learnClick, learnInput } from './learn.js';
 import { game as NETGAME, mergeView } from './netgame.js';
 import { createOnline } from './online.js?v=a3d0418b';
 import { seenAfterReload, handGeom, nameMode, crowded, keepSel } from './guards.js?v=8';
+import * as EKP from './ekprofile.js?v=10';
+import * as EKC from './ekcoach.js?v=10';
+import { faceSVG, momentSVG } from './faces.js?v=10';
+import { replaySteps, replayHTML } from './replay.js?v=10';
 
-export const VERSION = 'v1.0';
+export const VERSION = 'v1.1';
 const LS = 'ek:v1';
 const LAPTOP = matchMedia('(min-width: 900px)');
 const BOT_NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fay', 'Gus', 'Hal', 'Ivy'];
@@ -28,7 +32,14 @@ const S = {
   game: null, seats: null, viewer: 0, shown: -1, sel: [], hint: null, review: [], seenLog: 0,
   gen: 0, sheet: null, newIds: new Set(),
   net: null, localBak: null, // online room snapshot; the local game waits in localBak
+  // My stats, Undo and replay (local games only): mode null | 'daily' | 'tutorial',
+  // helped = Hint/Undo/Study used, recorded = result already in My stats,
+  // undo = the game before each of your moves, moves = every move (replay),
+  // mine = moves the person made (leaving after the first counts as a loss)
+  mode: null, helped: false, recorded: false, undo: [], moves: [], mine: 0,
+  react: {}, // seat -> { mood, until }: a computer's face for a moment
 };
+const UNDO_MAX = 30;
 
 function load() {
   try {
@@ -44,14 +55,23 @@ function load() {
         myName: typeof su.myName === 'string' ? su.myName.slice(0, 12) : '',
       };
     }
-    if (d.game && d.game.log && d.game.hands && Array.isArray(d.seats)) { S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = seenAfterReload(d.game.log); }
+    if (d.game && d.game.log && d.game.hands && Array.isArray(d.seats)) {
+      S.game = d.game; S.seats = d.seats; S.review = d.review || []; S.seenLog = seenAfterReload(d.game.log);
+      const m = d.meta || {};
+      S.mode = ['daily', 'tutorial'].includes(m.mode) ? m.mode : null;
+      S.helped = !!m.helped; S.recorded = !!m.recorded; S.mine = +m.mine || 0;
+      S.moves = Array.isArray(m.moves) ? m.moves : [];
+      S.undo = Array.isArray(d.undo) ? d.undo.filter((u) => u && u.game && u.game.log).slice(-UNDO_MAX) : [];
+    }
     if (d.tab) S.tab = d.tab;
   } catch { /* storage blocked: start fresh */ }
 }
 function save() {
   try {
     const loc = S.net ? S.localBak || {} : S;
-    localStorage.setItem(LS, JSON.stringify({ settings: S.settings, setup: S.setup, game: loc.game || null, seats: loc.seats || null, review: loc.review || [], tab: S.tab }));
+    const meta = S.net ? (S.localBak || {}).meta || null : { mode: S.mode, helped: S.helped, recorded: S.recorded, mine: S.mine, moves: S.moves };
+    const undo = (S.net ? (S.localBak || {}).undo || [] : S.undo).slice(-3); // whole games: keep the save small
+    localStorage.setItem(LS, JSON.stringify({ settings: S.settings, setup: S.setup, game: loc.game || null, seats: loc.seats || null, review: loc.review || [], tab: S.tab, meta, undo }));
   } catch { /* private mode: play still works, just not saved */ }
 }
 export const settings = () => S.settings;
@@ -136,6 +156,7 @@ function setTab(t, how = 'push') {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === 'v-' + t));
   render();
   save();
+  if (window.COACH) { if (t === 'play') offerTutorial(); else window.COACH.closeOffer(); }
 }
 
 const histState = () => { try { return history.state || {}; } catch { return {}; } };
@@ -150,6 +171,9 @@ function openMenu() {
 function resumeGame() { S.screen = null; render(); step(); }
 function onPop(e) {
   const st = (e && e.state) || {};
+  // Back closes the rules sheet or My stats first
+  if (window.COACH && window.COACH.rulesOpen()) { window.COACH.closeRules(); return; }
+  if (P() && P().isOpen()) { P().closePanel(); return; }
   if (!S.net && S.tab === 'play' && st.tab === 'play') {
     if (S.sheet === 'info' && st.sheet !== 'info') { S.sheet = null; closeSheet(); render(); return; }
     if (st.screen === 'setup' && S.game) { S.screen = 'setup'; clearTimeout(timer); closeSheet(); render(); return; }
@@ -203,6 +227,7 @@ function renderSetup() {
   $('#v-play').innerHTML = `<div class="scroll" style="flex:1"><div class="setup">
     <div class="hero"><div class="art">${cardSVG('EK')}</div>
       <div><h2>Play</h2><p>Last player not exploded wins. Odds shown as you play.</p></div></div>
+    ${P() ? `<div class="more-row"><button class="btn small pf-open" data-stats>${P().avatarSVG(P().avatar, 22)}My stats</button><button class="btn small" data-daily>${dailyDone() ? 'Daily ✓' : 'Daily game'}</button>${window.COACH ? '<button class="btn small" data-rules>Rules</button>' : ''}</div>` : ''}
     <div class="panel"><h2>Deck</h2>
       <div class="seg" role="group">${Object.entries(EDITIONS).map(([k, v]) => `<button data-edition="${k}" aria-pressed="${su.edition === k}">${v.label}</button>`).join('')}</div>
       <p class="muted" style="font-size:13px;margin:8px 0 0">${deckInfo} ${help('Original: 56 cards, 2–5 players. Imploding adds 20 cards and a 6th player. Party Pack: 2–10 players, uses paw-print cards for 2–3 players, the rest for 4–7, all of them for 8–10.')}</p>
@@ -237,9 +262,16 @@ const myName = () => {
   const seatName = (su.seats.find((x) => x.type === 'me') || {}).name;
   return (su.myName || (seatName && seatName !== 'You' ? seatName : '') || 'Player').slice(0, 12);
 };
+// the local game's My stats / Undo / replay notes, parked while an online room is open
+const localMeta = () => ({ mode: S.mode, helped: S.helped, recorded: S.recorded, mine: S.mine, moves: S.moves });
+function restoreMeta(m, undo) {
+  m = m || {};
+  S.mode = m.mode || null; S.helped = !!m.helped; S.recorded = !!m.recorded; S.mine = m.mine || 0; S.moves = m.moves || [];
+  S.undo = undo || [];
+}
 function leaveNet() {
-  if (S.localBak) { S.game = S.localBak.game; S.seats = S.localBak.seats; S.review = S.localBak.review || []; }
-  else { S.game = null; S.seats = null; S.review = []; }
+  if (S.localBak) { S.game = S.localBak.game; S.seats = S.localBak.seats; S.review = S.localBak.review || []; restoreMeta(S.localBak.meta, S.localBak.undo); }
+  else { S.game = null; S.seats = null; S.review = []; restoreMeta(null, []); }
   S.localBak = null; S.net = null; S.sheet = null; S.screen = 'setup';
   S.seenLog = S.game ? S.game.log.length : 0;
   closeSheet();
@@ -252,7 +284,7 @@ function onNet(snap) {
     }
     return;
   }
-  if (!S.net) { S.localBak = { game: S.game, seats: S.seats, review: S.review }; S.game = null; S.review = []; S.gen++; clearTimeout(timer); }
+  if (!S.net) { S.localBak = { game: S.game, seats: S.seats, review: S.review, meta: localMeta(), undo: S.undo }; S.game = null; S.review = []; S.gen++; clearTimeout(timer); }
   S.net = snap;
   S.screen = null;
   let cues = null;
@@ -316,13 +348,28 @@ async function joinRoom() {
 }
 
 // ------------------------------------------------------------------ game flow
-function startGame() {
+// kind: undefined (the setup screen's game) | 'daily' | 'tutorial'
+function startGame(kind) {
   const su = S.setup;
-  if (!su.seats.some((x) => x.type !== 'bot')) su.seats[0] = { type: 'me', name: su.seats[0].name || 'You' };
-  try {
-    S.game = newGame({ edition: su.edition, players: su.players, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth });
-  } catch (e) { toast(e.message); return; }
-  S.seats = su.seats.map((x) => ({ ...x }));
+  recordGame(); // a game left after your first move counts as a loss
+  let cfg, seats, seed;
+  if (kind === 'daily') {
+    cfg = EKP.dailyCfg();
+    seats = [{ type: 'me', name: myName() === 'Player' ? 'You' : myName() }, ...EKP.DAILY.names.map((n) => ({ type: 'bot', level: EKP.DAILY.level, name: n }))];
+    seed = P().daily.seed() | 0;
+  } else if (kind === 'tutorial') {
+    cfg = { ...EKC.CFG };
+    seats = [{ type: 'me', name: 'You' }, ...EKC.NAMES.map((n) => ({ type: 'bot', level: 'easy', name: n }))];
+    seed = EKC.SEED;
+  } else {
+    if (!su.seats.some((x) => x.type !== 'bot')) su.seats[0] = { type: 'me', name: su.seats[0].name || 'You' };
+    cfg = { edition: su.edition, players: su.players, fast: S.settings.fast, stack: S.settings.stack, five: S.settings.five, twoBoth: S.settings.twoBoth };
+    seats = su.seats.map((x) => ({ ...x }));
+  }
+  try { S.game = newGame(cfg, seed); } catch (e) { toast(e.message); return; }
+  S.seats = seats;
+  S.mode = kind || null; S.helped = !!S.settings.study && kind !== 'tutorial'; S.recorded = false; S.undo = []; S.moves = []; S.mine = 0; S.react = {};
+  if (kind === 'tutorial' && tour) { tour.reset(); setTimeout(() => tour.start(), 300); }
   S.review = []; S.sel = []; S.hint = null; S.sheet = null; S.shown = -1;
   S.seenLog = S.game.log.length;
   S.gen++;
@@ -331,6 +378,41 @@ function startGame() {
   save();
   step();
   playCues(S.game.log, undefined);
+}
+
+// The Daily and the guided game: the computers' choices follow from the game
+// itself, so the same moves meet the same replies. Otherwise they're random.
+const botRng = (g, seat) => (S.mode ? makeRng((g.seed ^ Math.imul(g.log.length + 1, 0x9e3779b1)) + seat * 7919) : Math.random);
+
+const P = () => window.Profile || null;
+const canUndo = () => !S.net && S.mode !== 'daily' && humans().length === 1 && S.undo.length > 0 && S.game && S.game.phase !== 'over';
+// Undo (vs computers, not in the Daily): back to just before your last move.
+function undo() {
+  if (!canUndo()) return;
+  const u = S.undo.pop();
+  S.gen++; clearTimeout(timer); S.drawing = false;
+  S.game = u.game; S.review = S.review.slice(0, u.review); S.moves = S.moves.slice(0, u.moves);
+  S.helped = true; S.sel = []; S.hint = null; S.sheet = null; S.alter = null; S.place = null; S.react = {};
+  S.seenLog = S.game.log.length; S.newIds = new Set();
+  closeSheet(); FX.play('cardSlide');
+  save(); step();
+  COACH_UPDATE();
+}
+
+// One result per game into My stats (the kit's Profile). Leaving a game after
+// your first move is a loss; the guided game and online rooms don't count.
+function recordGame() {
+  const g = S.game;
+  if (!g || S.net || S.recorded || S.mode === 'tutorial' || !P()) return null;
+  if (g.phase !== 'over' && S.mine === 0) return null; // never really started
+  S.recorded = true;
+  try {
+    const r = EKP.result(g, S.seats || [], { helped: S.helped || !!S.settings.study, daily: S.mode === 'daily' });
+    if (!r) return null;
+    const out = P().recordResult(r);
+    S.lastResult = { ...r, elo: out && out.elo };
+    return out;
+  } catch { return null; } finally { save(); }
 }
 
 const DELAY = { fast: 280, normal: 700, slow: 1200 };
@@ -357,7 +439,7 @@ function step() {
       // page in the background: the computers wait until you look again
       if (document.hidden) { S.waitVisible = true; return; }
       const v = view(g, bot);
-      const a = timed('bot', () => decide(v, S.seats[bot].level, Math.random));
+      const a = timed('bot', () => decide(v, S.seats[bot].level, botRng(g, bot), habitOpts(v, placeOpts())));
       if (a.type === 'draw') tenseDraw(bot, true);
       else act(a, true);
     }, d);
@@ -371,6 +453,7 @@ function step() {
 function act(a, fromBot = false) {
   const g = S.game;
   if (!g) return;
+  const rv0 = S.review.length;
   // review: compare a human's turn choices with the Hard computer
   if (!fromBot && g.phase === 'turn' && (a.type === 'play' || a.type === 'draw')) {
     try {
@@ -395,6 +478,12 @@ function act(a, fromBot = false) {
   }
   let next;
   try { next = timed('apply', () => apply(g, a)); } catch (e) { FX.play('error'); toast(e.message); return; }
+  if (!fromBot) {
+    S.undo.push({ game: g, review: rv0, moves: S.moves.length });
+    if (S.undo.length > UNDO_MAX) S.undo.shift();
+    S.mine++;
+  }
+  S.moves.push(a);
   const before = g.log.length;
   S.game = next;
   const fresh = next.log.slice(before);
@@ -403,9 +492,11 @@ function act(a, fromBot = false) {
   const oldIds = new Set((g.hands[S.viewer] || []).map((c) => c.id));
   for (const c of next.hands[S.viewer] || []) if (!oldIds.has(c.id)) S.newIds.add(c.id);
   S.sel = []; S.hint = null;
+  if (next.phase === 'over') recordGame();
   save();
   step();
   playCues(fresh, g.cur); // after the redraw, so animations find the new screen
+  COACH_UPDATE();
 }
 
 function summarize(v, a) {
@@ -458,7 +549,36 @@ function fxEl(spec, role) {
     default: return null;
   }
 }
-const FXDOM = { el: fxEl, boom };
+// A computer's face for a moment: set the mood, redraw the seats, put it back after.
+function react(a) {
+  if (!S.seats || !S.seats[a.seat] || S.seats[a.seat].type !== 'bot') return;
+  const until = Date.now() + (a.ms || 1600);
+  S.react[a.seat] = { mood: a.mood, until };
+  renderIfPlay();
+  setTimeout(() => { const r = S.react[a.seat]; if (r && r.until === until) { delete S.react[a.seat]; renderIfPlay(); } }, (a.ms || 1600) + 20);
+}
+function moodOf(s) {
+  const g = S.game;
+  if (g.phase === 'over' && g.winner === s) return 'happy';
+  if (!g.alive[s]) return 'out';
+  const r = S.react[s];
+  return r && r.until > Date.now() ? r.mood : 'calm';
+}
+// The big moment: a cartoon kitten over the table. Yours fills the screen;
+// someone else's is smaller. Skipped with Animations off or reduced motion.
+function moment(a) {
+  if (!T.animOn() || S.tab !== 'play') return;
+  try { if (matchMedia('(prefers-reduced-motion: reduce)').matches) return; } catch { /* old browser */ }
+  document.querySelectorAll('.moment').forEach((m) => m.remove());
+  const d = document.createElement('div');
+  d.className = `moment ${a.kind} ${a.mine ? 'mine' : 'other'}`;
+  d.setAttribute('aria-hidden', 'true');
+  d.innerHTML = momentSVG(a.kind);
+  document.body.appendChild(d);
+  const ms = (a.kind === 'boom' ? (a.mine ? 1700 : 1000) : (a.mine ? 1500 : 1000)) * animSpeed();
+  setTimeout(() => d.remove(), ms);
+}
+const FXDOM = { el: fxEl, boom, moment, react };
 // mine(): the person holding this screen (every person in pass-the-phone)
 function playCues(events, cur, mine = isHuman) {
   const seen = events.filter((e) => !e.vis || e.vis.some((s) => mine(s)));
@@ -539,7 +659,7 @@ function renderPlay() {
   S.danger = pDanger; // for the drumroll before a risky draw
   const kittens = b ? b.nE + ((g.ikIn ?? g.deck.some((c) => c.t === 'IK')) ? 1 : 0) : 0;
   const dial = S.settings.odds ? `<div class="dial">${dialHTML(pDanger, 'next is a kitten')}
-      <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. Computers hide kittens by habit (Hard: right where the next player draws), and the odds use that; when a person hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
+      <div class="cap">${kittens} kitten${kittens === 1 ? '' : 's'} · ${v.deckCount} cards ${help('Exact chance the top card is a kitten, from everything you have seen: cards drawn, See the Future, where you hid kittens. Computers hide kittens by habit (Hard: usually right where the next player draws, sometimes deeper), and the odds use that; when a person hides one, every spot counts as equally likely. Shuffles wipe what you knew. Small boxes: the next 3 cards.')}</div>
       ${futureHTML(b)}
     </div>` : '<div></div>';
 
@@ -577,13 +697,14 @@ function renderPlay() {
   const opps = oppSeats.map((s, i) => {
     const turnBadge = g.cur === s && g.turns > 1 ? `<span class="badge">${g.turns}×</span>` : '';
     const lvl = S.seats[s].type === 'bot' ? S.seats[s].level[0].toUpperCase() : '';
+    const face = S.seats[s].type === 'bot' ? `<span class="av">${faceSVG(s, moodOf(s), crowd ? 18 : 22)}</span>` : '';
     const away = S.net && S.seats[s].type === 'remote' && !S.seats[s].online ? ' <span class="lvl">away</span>' : '';
     const peek = study && v.hands ?`<div class="peek">${v.hands[s].map((c) => `<span style="background:${CARD[c.t].color}">${CARD[c.t].short}</span>`).join('')}</div>` : '';
     const n = oppSeats.length, t = n > 1 ? Math.abs((i / (n - 1)) * 2 - 1) : 0;
     const k = Math.min(crowd ? 4 : 7, v.handCounts[s]);
     const backs = Array.from({ length: k }, (_, b) => `<i style="--i:${b};--r:${k > 1 ? ((b / (k - 1)) * 2 - 1) * 14 : 0}deg"></i>`).join('');
     return `<div class="opp ${g.cur === s && g.phase !== 'over' ? 'turn' : ''} ${g.alive[s] ? '' : 'out'}" data-seat="${s}" style="--arc:${Math.round(t * t * 30)}px">${turnBadge}
-      <div class="nm">${esc(name(s))}${lvl ? ` <span class="lvl">${lvl}</span>` : ''}${away}</div>
+      <div class="nm">${face}${esc(name(s))}${lvl ? ` <span class="lvl">${lvl}</span>` : ''}${away}</div>
       <div class="meta">${g.alive[s] ? `<span class="mini" style="--n:${k}">${backs}</span><span class="cnt">${v.handCounts[s]}</span>${v.defusesUsed[s] ? `<span class="du" title="Defuses used">D−${v.defusesUsed[s]}</span>` : ''}` : `<span class="outcard">${cardSVG('EK')}</span><span class="cnt">out</span>`}</div>
       ${peek}<div class="think"><i></i><i></i><i></i></div></div>`;
   }).join('');
@@ -654,7 +775,9 @@ function renderPlay() {
   handEl.style.setProperty('--hand-h', fan.H + 'px');
   const newIds = S.newIds;
   const handNew = patch('hand', handHtml || '<span class="muted" style="margin:auto">No cards</span>');
-  patch('p-acts', `<button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
+  const undoBtn = !S.net && S.mode !== 'daily' && humans().length === 1 ? `<button class="btn undo" data-undo aria-label="Undo your last move" title="Undo" ${canUndo() ? '' : 'disabled'}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>` : '';
+  $('#p-acts').classList.toggle('has-undo', !!undoBtn);
+  patch('p-acts', `${undoBtn}<button class="btn" data-hint ${myTurn ? '' : 'disabled'}>Hint</button>
           <button class="btn warm" data-play ${myTurn && kind ? '' : 'disabled'}>${playLabel}${risk ? ` <small style="font-weight:600;opacity:.75">· Nope ${Math.round(risk * 100)}%</small>` : ''}</button>
           <button class="btn primary" data-draw ${myTurn ? '' : 'disabled'}>Draw</button>`);
   const sideNew = patch('p-side', tracker + logHtml);
@@ -723,7 +846,7 @@ function renderPrompt(v, b, rows, lines) {
   renderPromptInner(v, b, rows, lines);
   const w = document.getElementById('sheet');
   const h = w && w.querySelector('h3');
-  const key = h ? h.textContent : '';
+  const key = h ? h.dataset.key || h.textContent : ''; // the replay's heading counts moves: still one sheet
   if (w !== sheetSeen.el || key !== sheetSeen.key) Object.assign(sheetSeen, { el: w, key, at: w ? Date.now() : 0 });
 }
 function renderPromptInner(v, b, rows, lines) {
@@ -739,6 +862,10 @@ function renderPromptInner(v, b, rows, lines) {
       <div class="btns"><button class="btn danger" data-leave>Leave room</button><button class="btn" data-close>Close</button></div>`);
     return;
   }
+  if (S.sheet && S.sheet.type === 'replay') {
+    sheet(replayHTML(S.sheet, (sx) => esc(name(sx)), (e) => describe(e, S.sheet.me), CARD, cardSVG));
+    return;
+  }
   if (g.phase === 'over') {
     const won = S.net ? g.winner === me : isHuman(g.winner);
     // pass-the-phone: each person gets their own score, not one pooled total
@@ -751,9 +878,13 @@ function renderPromptInner(v, b, rows, lines) {
       ${worst.length ? `<ul class="review">${worst.map((r) => `<li>Kitten chance <b style="color:${pctColor(r.pE)}">${fmtPct(r.pE)}</b>: ${who ? 'chose' : 'you chose'} <b>${esc(r.mine)}</b>, Hard would <b>${esc(r.best)}</b>.</li>`).join('')}</ul>` : ''}`;
     };
     const reviewHtml = people ? people.map((p) => reviewOf(S.review.filter((r) => r.seat === p), name(p))).join('') : reviewOf(S.review, '');
-    const btns = S.net ? '<button class="btn primary" data-leave>Leave room</button>' : '<button class="btn" data-setup>Change setup</button><button class="btn primary" data-again>Play again</button>';
+    const lr = !S.net && S.lastResult && S.recorded ? S.lastResult : null;
+    const rated = S.mode === 'tutorial' ? '<p>Guided game: not counted in My stats.</p>'
+      : lr && lr.mode === 'help' ? '<p>Not rated: Hint, Undo or Study mode was used.</p>'
+      : lr && lr.elo ? `<p>Rating ${lr.elo.after} (${lr.elo.change >= 0 ? '+' : ''}${lr.elo.change}) vs ${esc(lr.level)}.</p>` : '';
+    const btns = S.net ? '<button class="btn primary" data-leave>Leave room</button>' : `<button class="btn" data-replay>Replay</button><button class="btn" data-setup>Change setup</button><button class="btn primary" data-again>${S.mode === 'daily' ? 'New game' : 'Play again'}</button>`;
     sheet(`<h3>${won ? (!S.net && humans().length > 1 ? esc(name(g.winner)) + ' wins!' : 'You win! 🏆') : esc(name(g.winner)) + ' wins'}</h3>
-      ${reviewHtml}
+      ${rated}${reviewHtml}
       <div class="btns">${btns}</div>`);
     return;
   }
@@ -839,6 +970,51 @@ function promptName() {
     <div class="btns"><button class="btn ghost" data-close>Cancel</button></div>`);
 }
 
+// ------------------------------------------------------------------ replay, rules, My stats, guided game
+function openReplay() {
+  const g = S.game;
+  if (!g || S.net) return;
+  const r = replaySteps(g, S.moves);
+  if (r.frames.length < 2) { toast('No replay for this game.'); return; }
+  S.sheet = { type: 'replay', frames: r.frames, i: r.frames.length - 1, me: humans()[0] ?? 0 };
+  render();
+}
+function replayGo(to) {
+  const sh = S.sheet;
+  if (!sh || sh.type !== 'replay') return;
+  const n = sh.frames.length - 1;
+  sh.i = Math.max(0, Math.min(n, to === 'first' ? 0 : to === 'last' ? n : to === 'prev' ? sh.i - 1 : to === 'next' ? sh.i + 1 : +to));
+  const r = $('#sheet .sheet'); const keep = r ? r.scrollTop : 0;
+  render();
+  const r2 = $('#sheet .sheet'); if (r2) r2.scrollTop = keep;
+}
+function openRules() {
+  if (!window.COACH) return;
+  window.COACH.rules({ ...EKC.RULES });
+}
+function dailyDone() { try { return !!(P() && P().daily.played()); } catch { return false; } }
+
+// The guided first game (shared coach kit): a fixed deal vs two Easy computers.
+let tour = null;
+function COACH_UPDATE() { if (window.COACH && tour) { try { window.COACH.update(); } catch { /* coach is optional */ } } }
+function setupCoach() {
+  const C = window.COACH;
+  if (!C) return;
+  tour = C.tour({
+    id: EKC.ID,
+    steps: EKC.steps({ game: () => (S.mode === 'tutorial' && !S.net ? S.game : null), sheet: () => { const h = $('#sheet h3'); return h ? h.textContent : ''; } }),
+    pauseIf: () => S.tab !== 'play' || S.mode !== 'tutorial' || !!S.net || S.screen === 'setup' || !S.game || (P() && P().isOpen()) || C.rulesOpen(),
+    onFinish: () => {},
+  });
+  new MutationObserver(() => C.update()).observe(document.body, { childList: true });
+}
+// Offered once, on the Play setup screen.
+function offerTutorial() {
+  const C = window.COACH;
+  if (!C || !tour || S.game || S.net || S.tab !== 'play' || C.offered(EKC.ID)) return;
+  C.offer({ id: EKC.ID, title: 'New to Exploding Kittens?', text: 'Play one guided game against two Easy computers.', yes: 'Teach me', no: 'No thanks', onYes: () => { S.screen = null; startGame('tutorial'); } });
+}
+
 // ------------------------------------------------------------------ settings
 function renderSettings() {
   const s = S.settings;
@@ -853,8 +1029,8 @@ function renderSettings() {
     </div><p class="muted" style="font-size:12.5px;margin:6px 0 0">Rule changes apply to the next game.</p></div>
     <div class="panel"><h2>Help</h2><div class="list">
       ${sw('odds', 'Show odds', 'Kitten chance, next cards, Nope risk')}
-      ${sw('study', 'Study mode', 'See every hand and the top of the pile', 'For learning: watch what the computers hold and how the odds play out.')}
-    </div></div>
+      ${sw('study', 'Study mode', 'See every hand and the top of the pile', 'For learning: watch what the computers hold and how the odds play out. Games played with it on are not rated in My stats.')}
+    </div>${window.COACH ? '<div class="more-row" style="margin-top:10px"><button class="btn small" data-rules>Rules</button><button class="btn small" data-tutorial>Guided first game</button></div>' : ''}</div>
     <div class="panel"><h2>Computer speed</h2>
       <div class="seg">${['slow', 'normal', 'fast'].map((k) => `<button data-speed="${k}" aria-pressed="${s.speed === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></div>
     <div class="panel"><h2>Sound &amp; effects</h2><div id="fxbox"></div></div>
@@ -879,6 +1055,9 @@ function onClick(e) {
     return;
   }
   if (S.tab === 'learn') { if (learnClick(t)) render(); return; }
+  if ('rules' in d) { openRules(); return; }
+  if ('stats' in d) { if (P()) P().openPanel(); return; }
+  if ('tutorial' in d) { setTab('play'); S.screen = null; startGame('tutorial'); return; }
   if (S.tab === 'settings') {
     if (settingsTap(d, S.settings)) { save(); render(); }
     return;
@@ -887,6 +1066,13 @@ function onClick(e) {
   const g = S.game;
   if (d.edition) { S.setup.edition = d.edition; save(); render(); return; }
   if (d.players) { S.setup.players += +d.players; save(); render(); return; }
+  if ('daily' in d) {
+    if (dailyDone()) { if (P()) P().openPanel({ tab: 'daily' }); return; }
+    S.screen = null; try { history.replaceState({ tab: 'play' }, ''); } catch { /* no history */ } startGame('daily'); return;
+  }
+  if ('undo' in d) { undo(); return; }
+  if ('replay' in d) { openReplay(); return; }
+  if (d.rp) { replayGo(d.rp); return; }
   if ('start' in d) { S.screen = null; try { history.replaceState({ tab: 'play' }, ''); } catch { /* no history */ } startGame(); return; }
   if ('create' in d) { createRoom(); return; }
   if ('join' in d) { joinRoom(); return; }
@@ -902,6 +1088,7 @@ function onClick(e) {
   if ('reveal' in d) { S.shown = S.viewer; render(); return; }
   if ('newgame' in d || 'setup' in d) { openMenu(); return; }
   if ('again' in d) { closeSheet(); startGame(); return; }
+  if ('close' in d && S.sheet && S.sheet.type === 'replay') { S.sheet = null; closeSheet(); render(); return; }
   if ('close' in d) { if (S.sheet === 'info' && histState().sheet === 'info') { history.back(); return; } S.sheet = null; closeSheet(); render(); return; }
   if (d.sheet === 'info') { S.sheet = 'info'; pushHist({ tab: 'play', sheet: 'info' }); render(); return; }
   if (!g) return;
@@ -913,6 +1100,7 @@ function onClick(e) {
     render(); return;
   }
   if ('hint' in d) {
+    if (S.mode !== 'tutorial') S.helped = true;
     const v = view(g, me);
     const best = decide(v, 'hard', () => 0.5, placeOpts());
     const A = assess(v, 'hard', placeOpts());
@@ -997,6 +1185,7 @@ function onInput(e) {
   const t = e.target;
   if (S.tab === 'table') { if (tableInput(t)) render(); return; }
   if (S.tab === 'learn') { if (learnInput(t)) render(); return; }
+  if (t.dataset.rpstep != null) { replayGo(+t.value); return; }
   if (t.dataset.place != null) {
     S.place = +t.value;
     const sp = $('#spot'); if (sp) sp.textContent = spotLabel(S.place, S.game.deck.length);
@@ -1007,7 +1196,7 @@ function onInput(e) {
 }
 function onChange(e) {
   const t = e.target;
-  if (t.dataset.set) { S.settings[t.dataset.set] = t.checked; save(); render(); return; }
+  if (t.dataset.set) { S.settings[t.dataset.set] = t.checked; if (t.dataset.set === 'study' && t.checked && S.game && S.game.phase !== 'over' && !S.net) S.helped = true; save(); render(); return; }
   if (t.dataset.seattype != null) {
     const i = +t.dataset.seattype; const [type, level] = t.value.split(':');
     const seat = S.setup.seats[i];
@@ -1051,9 +1240,16 @@ document.addEventListener('visibilitychange', () => {
   adoptSaved();
   if (S.waitVisible) { S.waitVisible = false; step(); }
 });
+// My stats (shared profile kit) and the guided game (shared coach kit)
+EKP.init(P(), () => { if (P()) P().closePanel(); setTab('play'); S.screen = null; startGame('daily'); });
+if (P()) P().onChange((what) => { if (what === 'result' || what === 'me') { if (S.tab === 'play' && (!S.game || S.screen === 'setup') && !S.net) render(); } });
+setupCoach();
 try {
-  setTab(['play', 'table', 'learn', 'settings'].includes(S.tab) ? S.tab : 'play', 'replace');
+  // always open on Play (Table, Learn and Settings are one tap away)
+  setTab('play', 'replace');
   if (S.game && S.game.phase !== 'over') step();
+  if (S.mode === 'tutorial' && S.game && S.game.phase !== 'over' && tour) tour.resume();
+  else offerTutorial();
 } catch (e) {
   // a saved game we can't draw (old version, damaged storage): start clean, keep settings
   console.warn('dropped saved game', e);
@@ -1063,5 +1259,14 @@ try {
 // back into an online room after a reload (loads nothing unless a room was saved)
 try { if (localStorage.getItem('online.exploding-kittens')) getNet().resume(); } catch { /* storage blocked */ }
 
+// Home-screen app (shared pwa kit): reload to a new build only when nothing would be lost.
+if (window.PWA) window.PWA.safeToReload = () => {
+  if (S.net || $('#sheet') || S.drawing) return false;
+  if ((window.COACH && window.COACH.rulesOpen()) || (P() && P().isOpen())) return false;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return false;
+  return !S.game || S.game.phase === 'over' || S.tab !== 'play' || S.screen === 'setup';
+};
+
 // for tests / debugging in the console
-window.EK = { S, act, step, view: () => S.game && view(S.game, S.viewer), net: () => net, perf };
+window.EK = { S, act, step, undo, startGame, recordGame, openReplay, FXDOM, view: () => S.game && view(S.game, S.viewer), net: () => net, perf, tour: () => tour };

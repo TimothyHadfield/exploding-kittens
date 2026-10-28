@@ -331,3 +331,90 @@ details.rules p, details.rules li { color: #c9cde0; font-size: 14px; }
   .future { margin-top: 2px; min-height: 22px; }
   .future span { width: 28px; height: 24px; font-size: 12px; }
 }
+
+/* ---- improvement pass 2026-10-27: faces, Undo, My stats row, big moments, replay */
+/* each computer's cat face on its name plate (js/faces.js); moods swap for a moment */
+.opp .nm .av { display: inline-block; vertical-align: -6px; margin: -3px 4px -3px -5px; line-height: 0; }
+.opp .nm .av .face { display: block; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .5)); }
+.opp .nm .av .face.mood-panic, .opp .nm .av .face.mood-smug { animation: avpop .35s ease-out; }
+@keyframes avpop { 0% { transform: scale(.7); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+.opps.crowd .opp .nm .av { margin: -2px 2px -2px -3px; vertical-align: -4px; }
+/* Undo: a narrow icon button left of Hint (only in games vs computers) */
+.acts.has-undo { grid-template-columns: 48px auto 1fr 1fr; }
+.acts .undo { padding: 0; }
+/* My stats / Daily / Rules on the setup screen and Settings */
+.more-row { display: flex; gap: 8px; }
+.more-row .btn { flex: 1; min-height: 40px; }
+.more-row .pf-open svg { flex: none; }
+/* the big moment over the table (pointer-events none: the game stays usable) */
+.moment { position: fixed; inset: 0; z-index: 45; pointer-events: none; display: grid; place-items: center; }
+.moment .mo-svg { width: min(78vw, 360px, 62vh); height: auto; overflow: visible; animation: mo-in .22s cubic-bezier(.2, 1.4, .4, 1) both; }
+.moment.other .mo-svg { width: min(42vw, 180px); }
+.moment.mine.boom { background: radial-gradient(circle, rgba(0, 0, 0, .35), rgba(0, 0, 0, .55)); animation: mo-bg 1.7s ease-out forwards; }
+.moment.mine.defuse { background: radial-gradient(circle, rgba(0, 0, 0, .25), rgba(0, 0, 0, .45)); animation: mo-bg 1.5s ease-out forwards; }
+@keyframes mo-bg { 0% { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes mo-in { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.moment .mo-eyes-shut { opacity: 0; }
+.moment .mo-spark { transform-box: fill-box; transform-origin: center; animation: mo-spark .12s linear infinite alternate; }
+@keyframes mo-spark { from { transform: scale(.8) rotate(0deg); } to { transform: scale(1.2) rotate(25deg); } }
+.moment .mo-word { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.moment .mo-burst { opacity: 0; transform-box: fill-box; transform-origin: center; }
+/* boom: the spark runs down the fuse, the cat shakes, then it blows */
+.moment.boom .mo-tip { animation: mo-burn .7s linear forwards; }
+@keyframes mo-burn { to { transform: translate(-32px, 30px); } }
+.moment.boom .mo-fuse { stroke-dasharray: 100; animation: mo-fuse .7s linear forwards; }
+@keyframes mo-fuse { to { stroke-dashoffset: 100; } }
+.moment.boom .mo-cat { transform-box: fill-box; transform-origin: center; animation: mo-shake .1s linear .45s 4, mo-blow .5s ease-in .78s forwards; }
+@keyframes mo-shake { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-4px, 2px) rotate(-3deg); } 75% { transform: translate(4px, -2px) rotate(3deg); } }
+@keyframes mo-blow { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+.moment.boom .mo-pupil { transform-box: fill-box; transform-origin: center; animation: mo-shrink .3s ease-out .35s forwards; }
+@keyframes mo-shrink { to { transform: scale(.45); } }
+.moment.boom .mo-burst { animation: mo-burst .8s ease-out .76s forwards; }
+@keyframes mo-burst { 0% { opacity: 1; transform: scale(.2) rotate(0deg); } 60% { opacity: 1; transform: scale(1.5) rotate(20deg); } 100% { opacity: 0; transform: scale(1.9) rotate(30deg); } }
+.moment.boom .mo-word { animation: mo-word .8s ease-out .8s forwards; }
+.moment.mine.boom .mo-svg { animation: mo-in .22s cubic-bezier(.2, 1.4, .4, 1) both, mo-out .3s ease-in 1.35s forwards; }
+/* someone else's boom: straight to the blast */
+.moment.other.boom .mo-tip, .moment.other.boom .mo-fuse { animation-duration: .25s; }
+.moment.other.boom .mo-cat { animation: mo-blow .4s ease-in .25s forwards; }
+.moment.other.boom .mo-burst { animation-delay: .25s; }
+.moment.other.boom .mo-word { animation-delay: .25s; }
+.moment.other .mo-svg { animation: mo-in .18s ease-out both, mo-out .25s ease-in .75s forwards; }
+@keyframes mo-word { 0% { opacity: 0; transform: scale(.4); } 30% { opacity: 1; transform: scale(1.15); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes mo-out { to { opacity: 0; transform: scale(1.05); } }
+/* defuse: the cutters close, the burning end drops, the cat relaxes */
+.moment.defuse .mo-blade { transform-box: view-box; transform-origin: 142px 58px; }
+.moment.defuse .mo-blade.a { animation: mo-close-a .25s ease-in .3s forwards; transform: rotate(14deg); }
+.moment.defuse .mo-blade.b { animation: mo-close-b .25s ease-in .3s forwards; transform: rotate(-14deg); }
+@keyframes mo-close-a { to { transform: rotate(-12deg); } }
+@keyframes mo-close-b { to { transform: rotate(12deg); } }
+.moment.defuse .mo-cut { animation: mo-fade .3s ease-in .9s forwards; }
+.moment.defuse .mo-tip { animation: mo-drop .6s ease-in .55s forwards; }
+@keyframes mo-drop { to { transform: translate(14px, 120px) rotate(70deg); opacity: 0; } }
+.moment.defuse .mo-eyes-open { animation: mo-fade .15s linear .6s forwards; }
+.moment.defuse .mo-eyes-shut { animation: mo-show .15s linear .6s forwards; }
+.moment.defuse .mo-word { animation: mo-word .6s ease-out .62s forwards; }
+.moment.mine.defuse .mo-svg { animation: mo-in .22s cubic-bezier(.2, 1.4, .4, 1) both, mo-out .3s ease-in 1.15s forwards; }
+@keyframes mo-fade { to { opacity: 0; } }
+@keyframes mo-show { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .moment { display: none; } }
+/* end-of-game replay */
+.rp-what { min-height: 2.6em; color: var(--text) !important; }
+.rp-pile { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0 0 10px; font-size: 13px; }
+.rp-card { width: 34px; display: inline-block; border-radius: 4px; }
+.rp-card .cardsvg { display: block; width: 100%; height: auto; }
+.rp-card.hot { outline: 2px solid var(--bad); outline-offset: 1px; }
+.rp-seats { display: grid; gap: 6px; }
+.rp-seat { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.rp-seat.cur { border-color: var(--warm); }
+.rp-seat.out { opacity: .6; }
+.rp-nm { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.rp-hand { display: flex; flex-wrap: wrap; gap: 3px; }
+.rp-chip { font-size: 11px; font-weight: 700; color: #17130f; padding: 1px 5px; border-radius: 4px; }
+.rp-nav { display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 6px; align-items: center; margin-top: 12px; }
+.rp-nav input { width: 100%; accent-color: var(--warm); }
+.rp-nav .btn { min-width: 40px; min-height: 40px; }
+/* shared coach kit: its rules tabs scroll sideways on a phone; wrap them (same fix as King of Tokyo) */
+.coach-rules .coach-rules-nav { flex-wrap: wrap; overflow-x: visible; row-gap: 6px; }
+.coach-rules td:first-child { white-space: nowrap; vertical-align: top; padding-right: 8px; }
+/* the "New to Exploding Kittens?" card sits above the tab bar and the Deal button */
+:root { --coach-offer-bottom: 144px; }

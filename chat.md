@@ -53,3 +53,5 @@
 - **Built:** Rules sheet Videos tab (5 checked links); phone-sideways empty strip removed; optional Streaking pack (15 cards, 9 new kinds) across engine, odds, all three computer levels, online masking, Undo/replay/save, card art, sounds and coach line. A blind-hand "Play a random card" button wrapped so Draw stays on screen at 320 and sideways. House rules: none added (no reliable common one beyond attack stacking). Remember-last-setup, speed and sound already existed.
 - **Verified:** `npm test` 91/91; new tests failed first on main (streak 15/16, odds 3, AI 3, online 1); ladders in node (streak 1000 games, base 2000 unchanged); WebKit/Chromium screenshots of base, blind, Alter 5x and Garbage sheets at 393, 320, 659×393, 568×320, 1280, 1440: no sideways scroll, no console errors (scratch `sk/shots-streak/`). Live at 923d3f2.
 - **Open:** Tim's calls on the streak rulings and looks (see Decisions); Table tab without streak; real iPhone.
+
+## 2026-10-28 — kit sweep (builder b1): `_coach` 1.2.0 offer `place:'auto'` avoiding Deal, overrides dropped, `_pwa` 1.4.0 build 14; offer 0 px overlap at 3 sizes, settings 320 ok, npm 91/91, pwa-check 18/18; live 971dca8.
